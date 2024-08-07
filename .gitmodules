@@ -1,0 +1,3 @@
+[submodule "components/UDPlogger"]
+	path = components/UDPlogger
+	url = https://github.com/HomeACcessoryKid/UDPlogger
