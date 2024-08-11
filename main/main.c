@@ -10,18 +10,22 @@
 #include "esp_wifi.h"
 // #include "lcm_api.h"
 #include <udplogger.h>
+#include "driver/i2s_std.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"
 
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
-#include "driver/i2s_std.h"
-#include "driver/gpio.h"
-#define OT0_SEND_PIN  GPIO_NUM_18
-#define OT1_SEND_PIN  GPIO_NUM_19
-#define BUFF_SIZE   272 //units of uint32=34 bits x2 halfbits x2 uint32 per hb (cause br=4000 and not 2000) x2 slots (stereo)
+#define OT0_SEND_PIN  GPIO_NUM_32
+#define OT1_SEND_PIN  GPIO_NUM_33
+#define OT0_RECV_PIN  GPIO_NUM_34
+#define OT1_RECV_PIN  GPIO_NUM_35
+
 
 static i2s_chan_handle_t   tx_chan0;    //I2S tx channel handler
 static i2s_chan_handle_t   tx_chan1;    //I2S tx channel handler
 
+#define BUFF_SIZE   272 //units of uint32=34 bits x2 halfbits x2 uint32 per hb (cause br=4000 and not 2000) x2 slots (stereo)
 #define ONE  0xFFFFFFFF
 #define ZERO 0x00000000
 #define SETONE(i)   do {dma_buf[i*8+0]=ONE; dma_buf[i*8+1]=ONE; dma_buf[i*8+2]=ONE; dma_buf[i*8+3]=ONE; \
@@ -48,6 +52,148 @@ void send_OT_frame(int OT_chan, uint32_t payload) {
     ESP_ERROR_CHECK(i2s_channel_disable(tx_chan)); //Disable the TX channel
 }
 
+
+#define  READY 0
+#define  START 1
+#define  RECV  2
+static QueueHandle_t gpio_evt_queue0;
+static QueueHandle_t gpio_evt_queue1;
+static int      resp_idx0=0, rx_state0=READY;
+static int      resp_idx1=0, rx_state1=READY;
+static uint32_t response0=0;
+static uint32_t response1=0;
+static void IRAM_ATTR gpio_isr_handler(void* arg) {
+    uint32_t gpio_num = (uint32_t) arg;
+    static uint64_t before0=0;
+    static uint64_t before1=0;
+    uint64_t now,delta;
+    int even,inv_read;
+    switch (gpio_num) {
+        case OT0_RECV_PIN: {
+            now=esp_timer_get_time(),delta=now-before0;
+            even=0, inv_read=gpio_get_level(OT0_RECV_PIN);//note that gpio_read gives the inverted value of the symbol
+            if (rx_state0==READY) {
+                if (inv_read) return;
+                rx_state0=START;
+                before0=now;
+            } else if (rx_state0==START) {
+                if (400<delta && delta<650 && inv_read) {
+                    resp_idx0=0; response0=0; even=0;
+                    rx_state0=RECV;
+                } //else error state but might be a new start, so just stay in this state
+                before0=now;
+            } else if (rx_state0==RECV)  {
+                if (900<delta && delta<1150) {
+                    if (resp_idx0<32) {
+                        response0=(response0<<1)|inv_read;
+                        if (inv_read) even++;
+                        resp_idx0++;
+                        before0=now;
+                    } else {
+                        if (even%2==0) {
+                            if (response0&0x0f000000) resp_idx0=-2; //signal issue reserved bits not zero
+                            else {
+                                response0&=0x7fffffff; //mask parity bit
+                                xQueueSendToBackFromISR(gpio_evt_queue0, (void*)&response0, NULL);
+                            }
+                        } else resp_idx0=-1; //signal issue parity failure
+                        rx_state0=READY;
+                    }
+                } else if (delta>=1150) { //error state
+                    if (inv_read) rx_state0=READY;
+                    else {rx_state0=START; before0=now;}
+                } //else do nothing so before0+=500 and next transit is a databit
+            }
+            
+            break;}
+        case OT1_RECV_PIN: {
+            now=esp_timer_get_time(),delta=now-before1;
+            even=0, inv_read=gpio_get_level(OT1_RECV_PIN);//note that gpio_read gives the inverted value of the symbol
+            if (rx_state1==READY) {
+                if (inv_read) return;
+                rx_state1=START;
+                before1=now;
+            } else if (rx_state1==START) {
+                if (400<delta && delta<650 && inv_read) {
+                    resp_idx1=0; response1=0; even=0;
+                    rx_state1=RECV;
+                } //else error state but might be a new start, so just stay in this state
+                before1=now;
+            } else if (rx_state1==RECV)  {
+                if (900<delta && delta<1150) {
+                    if (resp_idx1<32) {
+                        response1=(response1<<1)|inv_read;
+                        if (inv_read) even++;
+                        resp_idx1++;
+                        before1=now;
+                    } else {
+                        if (even%2==0) {
+                            if (response1&0x0f000000) resp_idx1=-2; //signal issue reserved bits not zero
+                            else {
+                                response1&=0x7fffffff; //mask parity bit
+                                xQueueSendToBackFromISR(gpio_evt_queue1, (void*)&response1, NULL);
+                            }
+                        } else resp_idx1=-1; //signal issue parity failure
+                        rx_state1=READY;
+                    }
+                } else if (delta>=1150) { //error state
+                    if (inv_read) rx_state1=READY;
+                    else {rx_state1=START; before1=now;}
+                } //else do nothing so before1+=500 and next transit is a databit
+            }
+            break;}
+        default:
+            break;
+    }
+}
+
+void task0(void *arg) {
+    uint32_t message;
+    while (true) {
+        if (xQueueReceive(gpio_evt_queue0, &(message), (TickType_t)850/portTICK_PERIOD_MS) == pdTRUE) {
+            UDPLUS("OT0: %08lx\n",message);
+        } else {
+            UDPLUS("!!! NO_RSP OT0:  resp_idx=%d rx_state=%d response=%08lx\n",resp_idx0, rx_state0, response0);
+            resp_idx0=0, rx_state0=READY, response0=0;
+        }
+    }
+}
+
+void task1(void *arg) {
+    uint32_t message;
+    while (true) {
+        if (xQueueReceive(gpio_evt_queue1, &(message), (TickType_t)850/portTICK_PERIOD_MS) == pdTRUE) {
+            UDPLUS("OT1:%08lx\n",message);
+        } else {
+            UDPLUS("!!! NO_RSP OT1: resp_idx=%d rx_state=%d response=%08lx\n",resp_idx1, rx_state1, response1);
+            resp_idx1=0, rx_state1=READY, response1=0;
+        }
+    }
+}
+
+#define ESP_INTR_FLAG_DEFAULT 0
+#define GPIO_INPUT_PIN_SEL  ((1ULL<<OT0_RECV_PIN) | (1ULL<<OT1_RECV_PIN))
+void OT_recv_init() {
+    gpio_evt_queue0 = xQueueCreate(10, sizeof(uint32_t));
+    gpio_evt_queue1 = xQueueCreate(10, sizeof(uint32_t));
+        
+    gpio_config_t io_conf = {}; //zero-initialize the config structure.
+
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL; //bit mask of the pins
+    io_conf.intr_type = GPIO_INTR_ANYEDGE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = 0; //disable pull-up mode (not sure this is needed, but we have hardware pulldown)
+    gpio_config(&io_conf); //configure GPIO with the given settings
+
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT); //install gpio isr service
+    gpio_isr_handler_add(OT0_RECV_PIN, gpio_isr_handler, (void*) OT0_RECV_PIN); //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(OT1_RECV_PIN, gpio_isr_handler, (void*) OT1_RECV_PIN); //hook isr handler for specific gpio pin
+        
+    xTaskCreate(task0,"task0",4096,NULL,1,NULL);
+    xTaskCreate(task1,"task1",4096,NULL,1,NULL);
+}
+
+
 void i2s_init() { //note that idle voltage is zero and cannot be flipped
     i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_chan0, NULL)); //no Rx
@@ -68,16 +214,16 @@ void main_task(void *arg) {
     vTaskDelay(300); //Allow Wi-Fi to connect
     UDPLUS("\n\nQuatt-control\n");
 
+    OT_recv_init();
     i2s_init();
     
     while (true) {
-        send_OT_frame(0, ZERO);
-        send_OT_frame(1, ONE);
-        vTaskDelay(400/portTICK_PERIOD_MS);
-        send_OT_frame(0, ONE);
-        send_OT_frame(1, ZERO);
-        vTaskDelay(400/portTICK_PERIOD_MS); 
+        send_OT_frame(0, 0x00120000); //18 CH water pressure
+        vTaskDelay(950/portTICK_PERIOD_MS);
+        send_OT_frame(0, 0x001a0000); //26 DHW temp
+        vTaskDelay(950/portTICK_PERIOD_MS); 
     }
+    //TODO: solve this: do not kill this, else the rest goes with it 
 }    
 
 void app_main(void) {
