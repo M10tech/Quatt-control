@@ -16,15 +16,34 @@
 
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
+#define OTNUM         2 //number of OpenTherm channels, max 3 for ESP32P4
+#define HEATPUMP      1
+#define BOILER        0
 #define OT0_SEND_PIN  GPIO_NUM_32
 #define OT1_SEND_PIN  GPIO_NUM_33
+#define OT2_SEND_PIN  GPIO_NUM_NC
 #define OT0_RECV_PIN  GPIO_NUM_34
 #define OT1_RECV_PIN  GPIO_NUM_35
+#define OT2_RECV_PIN  GPIO_NUM_NC
+
+#define BEAT 10 //in seconds
+#define SENSORS 3
+#define S1 0 //   salon temp sensor
+#define S2 1 //upstairs temp sensor
+#define S3 6 // outdoor temp sensor
+#define BW 4 //boiler water temp
+#define RW 5 //return water temp
+#define DW 8 //domestic home water temp
+float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
+
+int     heat_on=0;
+int     stateflg=0,errorflg=0;
+float   curr_mod=0,pressure=0;
 
 
-static i2s_chan_handle_t   tx_chan0;    //I2S tx channel handler
-static i2s_chan_handle_t   tx_chan1;    //I2S tx channel handler
-
+static int                 ot_send_pin[OTNUM],ot_recv_pin[OTNUM];
+static bool                ot_recv_enable[OTNUM];
+static i2s_chan_handle_t   tx_chan[OTNUM];    //I2S tx channel handlers
 #define BUFF_SIZE   272 //units of uint32=34 bits x2 halfbits x2 uint32 per hb (cause br=4000 and not 2000) x2 slots (stereo)
 #define ONE  0xFFFFFFFF
 #define ZERO 0x00000000
@@ -34,194 +53,290 @@ static i2s_chan_handle_t   tx_chan1;    //I2S tx channel handler
 #define SETZERO(i)  do {dma_buf[i*8+0]=ZERO;dma_buf[i*8+1]=ZERO;dma_buf[i*8+2]=ZERO;dma_buf[i*8+3]=ZERO; \
                         dma_buf[i*8+4]=ONE; dma_buf[i*8+5]=ONE; dma_buf[i*8+6]=ONE; dma_buf[i*8+7]=ONE; \
                         } while(0)
-void send_OT_frame(int OT_chan, uint32_t payload) {
+void send_OT_frame(int ch, uint32_t payload) {
     int i,j,even=0;
     size_t bytes_loaded;
     uint32_t dma_buf[BUFF_SIZE];
-    i2s_chan_handle_t tx_chan=OT_chan?tx_chan1:tx_chan0;
-    UDPLUS("CH%dSND:%08lx\n",OT_chan, payload);
+    if (ch>=OTNUM) return;
+    UDPLUS("CH%dSND:%08lx ",ch, payload);
     SETONE(0); SETONE(33); //START and STOP
     for (i=30,j=2 ; i>=0 ; i--,j++) { //j==0 is START and j==1 is parity
         if (payload&(1<<i)) SETONE(j); else SETZERO(j);
     }
     if (even%2) SETONE(1); else SETZERO(1); //parity bit
     //transmit the dma_buf once
-    ESP_ERROR_CHECK(i2s_channel_preload_data(tx_chan, dma_buf, BUFF_SIZE*sizeof(uint32_t), &bytes_loaded));
-    ESP_ERROR_CHECK(i2s_channel_enable(tx_chan)); //Enable the TX channel
-    vTaskDelay(50/portTICK_PERIOD_MS); //message is 34ms so 50ms is enough
-    ESP_ERROR_CHECK(i2s_channel_disable(tx_chan)); //Disable the TX channel
+    ESP_ERROR_CHECK(i2s_channel_preload_data(tx_chan[ch], dma_buf, BUFF_SIZE*sizeof(uint32_t), &bytes_loaded));
+    ESP_ERROR_CHECK(i2s_channel_enable(tx_chan[ch])); //Enable the TX channel
+    vTaskDelay(30/portTICK_PERIOD_MS); //message is 34ms
+    ot_recv_enable[ch]=true;
+    vTaskDelay(20/portTICK_PERIOD_MS); //message is 34ms so total 50ms is enough
+    ESP_ERROR_CHECK(i2s_channel_disable(tx_chan[ch])); //Disable the TX channel
 }
 
-
-#define  READY 0
+#define  IDLE  0
 #define  START 1
 #define  RECV  2
-static QueueHandle_t gpio_evt_queue0;
-static QueueHandle_t gpio_evt_queue1;
-static int      resp_idx0=0, rx_state0=READY;
-static int      resp_idx1=0, rx_state1=READY;
-static uint32_t response0=0;
-static uint32_t response1=0;
+static QueueHandle_t gpio_evt_queue[OTNUM];
+static int      resp_idx[OTNUM], rx_state[OTNUM];
+static uint32_t response[OTNUM];
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
-    static uint64_t before0=0;
-    static uint64_t before1=0;
-    uint64_t now,delta;
-    int even,inv_read;
-    switch (gpio_num) {
-        case OT0_RECV_PIN: {
-            now=esp_timer_get_time(),delta=now-before0;
-            even=0, inv_read=gpio_get_level(OT0_RECV_PIN);//note that gpio_read gives the inverted value of the symbol
-            if (rx_state0==READY) {
-                if (inv_read) return;
-                rx_state0=START;
-                before0=now;
-            } else if (rx_state0==START) {
-                if (400<delta && delta<650 && inv_read) {
-                    resp_idx0=0; response0=0; even=0;
-                    rx_state0=RECV;
-                } //else error state but might be a new start, so just stay in this state
-                before0=now;
-            } else if (rx_state0==RECV)  {
-                if (900<delta && delta<1150) {
-                    if (resp_idx0<32) {
-                        response0=(response0<<1)|inv_read;
-                        if (inv_read) even++;
-                        resp_idx0++;
-                        before0=now;
-                    } else {
-                        if (even%2==0) {
-                            if (response0&0x0f000000) resp_idx0=-2; //signal issue reserved bits not zero
-                            else {
-                                response0&=0x7fffffff; //mask parity bit
-                                xQueueSendToBackFromISR(gpio_evt_queue0, (void*)&response0, NULL);
-                            }
-                        } else resp_idx0=-1; //signal issue parity failure
-                        rx_state0=READY;
+    int ch=-1;
+    for (int i=0;i<OTNUM;i++) if (gpio_num==ot_recv_pin[i]) ch=i;
+    if (ch==-1) return; //this should not be possible...
+    if (ot_recv_enable[ch]==false) return; //don't waste ISR CPU on inactive channel
+
+    static uint64_t before[OTNUM]={};
+    uint64_t now[OTNUM],delta[OTNUM];
+    int even[OTNUM],read[OTNUM];
+
+    now[ch]=esp_timer_get_time();delta[ch]=now[ch]-before[ch];
+    even[ch]=0, read[ch]=gpio_get_level(ot_recv_pin[ch]);
+    if (rx_state[ch]==IDLE) {
+        if (!read[ch]) return;
+        rx_state[ch]=START;
+        before[ch]=now[ch];
+    } else if (rx_state[ch]==START) {
+        if (400<delta[ch] && delta[ch]<650 && (!read[ch])) {
+            resp_idx[ch]=0; response[ch]=0; even[ch]=0;
+            rx_state[ch]=RECV;
+        } //else error state but might be a new start, so just stay in this state
+        before[ch]=now[ch];
+    } else if (rx_state[ch]==RECV)  {
+        if (900<delta[ch] && delta[ch]<1150) {
+            if (resp_idx[ch]<32) { //TODO: should also read stop bit, right?
+                response[ch]=(response[ch]<<1)|(!read[ch]);
+                if (!read[ch]) even[ch]++;
+                resp_idx[ch]++;
+                before[ch]=now[ch];
+            } else { //received all 32 bits
+                if (even[ch]%2==0) {
+                    if (response[ch]&0x0f000000) resp_idx[ch]=-2; //signal issue reserved bits not zero
+                    else {
+                        response[ch]&=0x7fffffff; //mask parity bit
+                        xQueueSendToBackFromISR(gpio_evt_queue[ch], (void*)&response[ch], NULL);
                     }
-                } else if (delta>=1150) { //error state
-                    if (inv_read) rx_state0=READY;
-                    else {rx_state0=START; before0=now;}
-                } //else do nothing so before0+=500 and next transit is a databit
+                } else resp_idx[ch]=-1; //signal issue parity failure
+                rx_state[ch]=IDLE;
+                ot_recv_enable[ch]=false;
             }
-            
-            break;}
-        case OT1_RECV_PIN: {
-            now=esp_timer_get_time(),delta=now-before1;
-            even=0, inv_read=gpio_get_level(OT1_RECV_PIN);//note that gpio_read gives the inverted value of the symbol
-            if (rx_state1==READY) {
-                if (inv_read) return;
-                rx_state1=START;
-                before1=now;
-            } else if (rx_state1==START) {
-                if (400<delta && delta<650 && inv_read) {
-                    resp_idx1=0; response1=0; even=0;
-                    rx_state1=RECV;
-                } //else error state but might be a new start, so just stay in this state
-                before1=now;
-            } else if (rx_state1==RECV)  {
-                if (900<delta && delta<1150) {
-                    if (resp_idx1<32) {
-                        response1=(response1<<1)|inv_read;
-                        if (inv_read) even++;
-                        resp_idx1++;
-                        before1=now;
-                    } else {
-                        if (even%2==0) {
-                            if (response1&0x0f000000) resp_idx1=-2; //signal issue reserved bits not zero
-                            else {
-                                response1&=0x7fffffff; //mask parity bit
-                                xQueueSendToBackFromISR(gpio_evt_queue1, (void*)&response1, NULL);
-                            }
-                        } else resp_idx1=-1; //signal issue parity failure
-                        rx_state1=READY;
-                    }
-                } else if (delta>=1150) { //error state
-                    if (inv_read) rx_state1=READY;
-                    else {rx_state1=START; before1=now;}
-                } //else do nothing so before1+=500 and next transit is a databit
-            }
-            break;}
-        default:
+        } else if (delta[ch]>=1150) { //error state
+            if (!read[ch]) rx_state[ch]=IDLE;
+            else {rx_state[ch]=START; before[ch]=now[ch];}
+        } //else do nothing so before0+=500 and next transit is a databit
+    }
+}
+
+
+int timeIndex=0,pump_off_time=0;
+// int switch_state=0,retrigger=0;
+// int push=-2;
+TimerHandle_t xTimer;
+void vTimerCallback( TimerHandle_t xTimer ) {
+    uint32_t seconds = ( uint32_t ) pvTimerGetTimerID( xTimer );
+    vTimerSetTimerID( xTimer, (void*)seconds+1); //136 year to loop
+    uint32_t message;
+    int switch_on=0;
+//     if (gpio_read(SWITCH_PIN)) switch_state--; else switch_state++; //pin is low when switch is on
+//     if (switch_state<0) switch_state=0;
+//     if (switch_state>3) switch_state=3;
+//     switch_on=switch_state>>1;
+//     //TODO read recv pin and if it is a ONE, we have an OpenTherm error state
+    UDPLUS("St%d Sw%d @%ld ",timeIndex,switch_on,seconds);
+//     if (timeIndex==3) { // allow 3 seconds for two automation rules to succeed and repeat every 10 seconds
+//         if (pump_off_time) pump_off_time-=10;
+//         if (tgt_heat1.value.int_value==2) { //Pump Off rule confirmed
+//             cur_heat2.value.int_value= 1;   //confirm we are heating upstairs
+//             homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
+//             tgt_heat1.value.int_value= 3;   //set heater 1 mode back to auto and be ready for another trigger
+//             homekit_characteristic_notify(&tgt_heat1,HOMEKIT_UINT8(tgt_heat1.value.int_value)); //TODO: racecondition?
+//             pump_off_time=180; //seconds
+//             heat_on=1;
+//         }
+//         if (cur_heat2.value.int_value==2) {//send reminder notify
+//             cur_heat2.value.int_value= 0; //to assure it is considered as a new value we first set it to off
+//             homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value)); //and notify
+//             retrigger=1;
+//             if (pump_off_time>10) heat_on=1; //still time left
+//         }
+//     }
+//     if (retrigger && timeIndex==8) { retrigger=0; //retrigger needed 5 seconds offset
+//         cur_heat2.value.int_value= 2;
+//         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
+//     }
+    switch (timeIndex) { //send commands OT0
+        case 0: //measure temperature
+//             xTaskNotifyGive( tempTask ); //temperature measurement start
+//             vTaskDelay(1); //prevent interference between OneWire and OT-receiver
+            message=0x00190000; //25 read boiler water temperature
             break;
+        case 1: //execute heater decisions
+//             if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+                   message=0x10014b00; //75 deg //1  CH setpoint in deg C
+//             } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
+//                    message=0x10010000|(uint32_t)(heat_sp*256);
+//             } else message=0x10010000|(uint32_t)(tgt_temp1.value.float_value*2-1)*256; //range from 19 - 75 deg
+            break;
+        case 2:
+            message=0x100e1100;
+//             if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+//                 if (tgt_temp2.value.float_value>17) message=0x100e0000|(uint32_t)(4*tgt_temp2.value.float_value-52)*256; //18-100%
+//                 else message=0x100e1100; //17%
+//             } else   message=0x100e6400; //100% //14 max modulation level
+            break;
+        case 3:
+            message=0x00000200;
+//             if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+//                    message=0x00000200|(switch_on?0x100:0x000); //0  enable CH and DHW
+//             } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
+//                    message=0x00000200|(  heat_on?0x100:0x000);
+//             } else message=0x00000200|(tgt_heat1.value.int_value<<8);
+            break; 
+        case 4:
+//             if (tgt_heat2.value.int_value==2) { //test BLOR
+//                    message=0x10040100; //4.1  BoilerLockOutReset
+//             } else message=0x00380000; //56 DHW setpoint write
+            message=0x00380000;
+            break;
+        case 5: message=0x00050000; break; //5  app specific fault flags
+        case 6: message=0x00120000; break; //18 CH water pressure
+        case 7: message=0x001a0000; break; //26 DHW temp
+        case 8: message=0x001c0000; break; //28 return water temp
+        case 9: message=0x00110000; break; //17 rel mod level
+        default: break;
     }
-}
-
-void task0(void *arg) {
-    uint32_t message;
-    while (true) {
-        if (xQueueReceive(gpio_evt_queue0, &(message), (TickType_t)850/portTICK_PERIOD_MS) == pdTRUE) {
-            UDPLUS("OT0: %08lx\n",message);
-        } else {
-            UDPLUS("!!! NO_RSP OT0:  resp_idx=%d rx_state=%d response=%08lx\n",resp_idx0, rx_state0, response0);
-            resp_idx0=0, rx_state0=READY, response0=0;
+    send_OT_frame(BOILER, message); //send message to BOILER OT receiver
+    //since we want to run two OT channels every second, we only wait for response for 400ms
+    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
+        UDPLUS("CH%dRSP:%08lx\n",BOILER,message);
+        switch (timeIndex) { //check answers
+            case 0: temp[BW]=(float)(message&0x0000ffff)/256; break;
+            case 3:
+//                 heat_mod=0.0;
+                stateflg=(message&0x0000007f);
+//                 if ((stateflg&0xa)==0xa) {
+//                     heat_mod=1.0; //at this point it is a multiplier
+//                     cur_heat1.value.int_value=pump_off_time?2:1; //present heater on but pump off as cur_heat1=2 COOL
+//                 } else cur_heat1.value.int_value=0;
+//                 homekit_characteristic_notify(&cur_heat1,HOMEKIT_UINT8(cur_heat1.value.int_value));
+                break;
+            case 5: errorflg=       (message&0x00003f00)/256; break;
+            case 6: pressure=(float)(message&0x0000ffff)/256; break;
+            case 7: temp[DW]=(float)(message&0x0000ffff)/256; break;
+            case 8: temp[RW]=(float)(message&0x0000ffff)/256; break;
+            case 9:
+                curr_mod=(float)(message&0x0000ffff)/256;
+//                 if (curr_mod==70.0) heat_mod=0.0; else heat_mod*=curr_mod;
+                break;
+            default: break;
         }
+    } else { //TODO: make this a function
+        UDPLUS("!!! CH%d_NO_RSP: resp_idx=%d rx_state=%d response=%08lx\n",BOILER,resp_idx[BOILER], rx_state[BOILER], response[BOILER]);
+        resp_idx[BOILER]=0, rx_state[BOILER]=IDLE, response[BOILER]=0; //TODO: is this critical for proper operation?
+        ot_recv_enable[BOILER]=false;
     }
-}
+    
+//     if (!timeIndex) {
+//         CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
+//     }
+//     
+//     //errorflg=(seconds/600)%2; //test trick to change outcome every 10 minutes
+//     if (seconds%60==5) {
+//         if (errorflg) { //publish a ORANGE (3) ALERT on domoticz
+//             if (push>0) {
+//                 int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":3,\"svalue\":\"Heater ERR: 0x%02X\"}", idx, errorflg);
+//                 if (n<0) UDPLUS("MQTT publish of ALERT failed because %s\n",MQTT_CLIENT_ERROR(n)); else push--;
+//                 if (push==0) push=-2;
+//             }
+//         } else { //publish a GREY (0) clean ALERT on domoticz
+//             if (push<0) {
+//                 int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"Heater OK (again) %d\"}", idx, seconds/60);
+//                 if (n<0) UDPLUS("MQTT publish of ALERT failed because %s\n",MQTT_CLIENT_ERROR(n)); else push++;
+//                 if (push==0) push=3;            
+//             }
+//         }
+//     }
+//  if (seconds%3600==3599) { //force a alive report every hour
+//      int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"Heater alive %d\"}", idx, seconds/60);    
+//  }
+//  
+//     if (seconds%60==50) { //allow 6 temperature measurments to make sure all info is loaded
+//         heat_on=0;
+//         cur_heat2.value.int_value=heater(seconds); //sets heat_sp and returns heater result, 0, 1 or 2
+//         if (cur_heat2.value.int_value==2 && pump_off_time>90) cur_heat2.value.int_value=1; //do not retrigger rules yet
+//         if (cur_heat2.value.int_value==1) heat_on=1;
+//         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
+//     }
 
-void task1(void *arg) {
-    uint32_t message;
-    while (true) {
-        if (xQueueReceive(gpio_evt_queue1, &(message), (TickType_t)850/portTICK_PERIOD_MS) == pdTRUE) {
-            UDPLUS("OT1:%08lx\n",message);
-        } else {
-            UDPLUS("!!! NO_RSP OT1: resp_idx=%d rx_state=%d response=%08lx\n",resp_idx1, rx_state1, response1);
-            resp_idx1=0, rx_state1=READY, response1=0;
-        }
+    if (timeIndex==3) {
+        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f ERR=%02x RW=%4.1f BW=%4.1f POT=%3d ON=%d MOD=%02.0f ST=%02x\n", \
+           temp[S1],temp[S2],temp[S3],pressure,temp[DW],errorflg,temp[RW],temp[BW],pump_off_time,heat_on,curr_mod,stateflg);
     }
-}
 
-#define ESP_INTR_FLAG_DEFAULT 0
-#define GPIO_INPUT_PIN_SEL  ((1ULL<<OT0_RECV_PIN) | (1ULL<<OT1_RECV_PIN))
+    timeIndex++; if (timeIndex==BEAT) timeIndex=0;
+} //this is a timer that restarts every 1 second
+
+
+#define ESP_INTR_FLAG_DEFAULT  0
+#define ESP_INTR_FLAG_MINE  ESP_INTR_FLAG_LEVEL3 | ESP_INTR_FLAG_IRAM //| ESP_INTR_FLAG_EDGE
 void OT_recv_init() {
-    gpio_evt_queue0 = xQueueCreate(10, sizeof(uint32_t));
-    gpio_evt_queue1 = xQueueCreate(10, sizeof(uint32_t));
-        
+    uint64_t gpio_input_pin_sel=0;
+    for (int i=0;i<OTNUM;i++) {
+        gpio_evt_queue[i] = xQueueCreate(1, sizeof(uint32_t));
+        gpio_input_pin_sel=gpio_input_pin_sel | (1ULL<< ot_recv_pin[i]);
+    }
     gpio_config_t io_conf = {}; //zero-initialize the config structure.
 
-    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL; //bit mask of the pins
+    io_conf.pin_bit_mask = gpio_input_pin_sel; //bit mask of the pins
     io_conf.intr_type = GPIO_INTR_ANYEDGE;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = 0; //disable pull-up mode (not sure this is needed, but we have hardware pulldown)
+    io_conf.pull_down_en = 1; //to cover temporarily floating input
     gpio_config(&io_conf); //configure GPIO with the given settings
 
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT); //install gpio isr service
-    gpio_isr_handler_add(OT0_RECV_PIN, gpio_isr_handler, (void*) OT0_RECV_PIN); //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(OT1_RECV_PIN, gpio_isr_handler, (void*) OT1_RECV_PIN); //hook isr handler for specific gpio pin
-        
-    xTaskCreate(task0,"task0",4096,NULL,1,NULL);
-    xTaskCreate(task1,"task1",4096,NULL,1,NULL);
+    gpio_install_isr_service(ESP_INTR_FLAG_MINE); //install gpio isr service
+    for (int i=0;i<OTNUM;i++) {
+        gpio_isr_handler_add(ot_recv_pin[i], gpio_isr_handler, (void*) ot_recv_pin[i]); //hook isr handler for specific gpio pin
+    }
 }
 
-
-void i2s_init() { //note that idle voltage is zero and cannot be flipped
+void OT_send_init() { //note that idle voltage is zero and cannot be flipped
     i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_chan0, NULL)); //no Rx
-    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_chan1, NULL)); //no RX
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(4000), //in halfbits per second, but min value higher than 2000 so use 4000
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {.mclk=I2S_GPIO_UNUSED, .bclk=I2S_GPIO_UNUSED, .ws=I2S_GPIO_UNUSED, .din=I2S_GPIO_UNUSED, },
     };
-    tx_std_cfg.gpio_cfg.dout=OT0_SEND_PIN;
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan0, &tx_std_cfg));
-    tx_std_cfg.gpio_cfg.dout=OT1_SEND_PIN;
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan1, &tx_std_cfg));
+    for (int i=0;i<OTNUM;i++) {
+        ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_chan[i], NULL)); //no Rx
+        tx_std_cfg.gpio_cfg.dout=ot_send_pin[i];
+        ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan[i], &tx_std_cfg));
+    }
+}
+
+void OT_init() {
+    for (int i=0;i<OTNUM;i++) {
+        if (i==0) {ot_recv_pin[i]=OT0_RECV_PIN; ot_send_pin[i]=OT0_SEND_PIN;}
+        if (i==1) {ot_recv_pin[i]=OT1_RECV_PIN; ot_send_pin[i]=OT1_SEND_PIN;}
+        if (i==2) {ot_recv_pin[i]=OT2_RECV_PIN; ot_send_pin[i]=OT2_SEND_PIN;}
+        rx_state[i]=IDLE; resp_idx[i]=0; response[i]=0;
+    }
+    OT_recv_init();
+    OT_send_init();
+    xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
+    xTimerStart(xTimer, 0);
 }
 
 void main_task(void *arg) {
     udplog_init(3);
     vTaskDelay(300); //Allow Wi-Fi to connect
     UDPLUS("\n\nQuatt-control\n");
-
-    OT_recv_init();
-    i2s_init();
+    
+    OT_init();
+    //esp_intr_dump(NULL);
     
     while (true) {
-        send_OT_frame(0, 0x00120000); //18 CH water pressure
-        vTaskDelay(950/portTICK_PERIOD_MS);
-        send_OT_frame(0, 0x001a0000); //26 DHW temp
-        vTaskDelay(950/portTICK_PERIOD_MS); 
+        vTaskDelay(1000/portTICK_PERIOD_MS); 
     }
     //TODO: solve this: do not kill this, else the rest goes with it 
 }    
@@ -253,9 +368,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_wifi_connect());
     //end of boilerplate code
 
-    xTaskCreate(main_task,"main",4096,NULL,1,NULL);
+    xTaskCreatePinnedToCore(main_task,"main",4096,NULL,1,NULL,1); //essential to use core 1 for GPIO interrupts
     while (true) {
         vTaskDelay(1000); 
     }
+    //TODO: solve this: do not kill this, else the rest goes with it 
     printf("app_main-done\n"); //will never exit here
 }
