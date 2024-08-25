@@ -41,7 +41,7 @@
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
 
 void temp_task(void *argv) {
-    int ids[SENSORS],fail=0,sensor_count=0;
+    int ids[SENSORS],fail=0,sensor_count;
     onewire_bus_handle_t bus; // install new 1-wire bus
     onewire_bus_config_t bus_config = {.bus_gpio_num = ONE_WIRE_PIN,};
     onewire_bus_rmt_config_t rmt_config = {.max_rx_bytes = 10,}; //1byte ROM command + 8byte ROM number + 1byte device command
@@ -54,7 +54,8 @@ void temp_task(void *argv) {
     onewire_device_t next_onewire_device;
     esp_err_t search_result = ESP_OK;
 
-    do {ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter)); //create 1-wire device iterator, which is used for device search
+    do {sensor_count=0;
+        ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter)); //create 1-wire device iterator, which is used for device search
         do {search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
             if (search_result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
                 ds18b20_config_t ds_cfg = {};
@@ -389,7 +390,7 @@ void OT_init() {
     }
     OT_recv_init();
     OT_send_init();
-    xTaskCreate(temp_task,"Temp", 4096, NULL, 1, &tempTask);
+    xTaskCreate(temp_task,"Temp", 6144, NULL, 1, &tempTask); //TODO: check if needs to be so big
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
 }

@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.0.5 stability improvement attempt
+- version 0.0.4 crashes usually within 1000s
+- version 0.0.3 was rock solid
+- fixed the sensor_count not reset at retry
+
 ### 0.0.4 Added ds18b20 sensor reading
 - run it every second but cycle through one sensor at a time
 - driver does not support ds18b20_any broadcast conversion trigger
