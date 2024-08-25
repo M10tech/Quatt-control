@@ -1,3 +1,9 @@
 [submodule "components/UDPlogger"]
 	path = components/UDPlogger
 	url = https://github.com/HomeACcessoryKid/UDPlogger
+[submodule "components/esp32-onewire_bus"]
+	path = components/esp32-onewire_bus
+	url = https://M10tech@github.com/M10tech/esp32-onewire_bus
+[submodule "components/esp32-ds18b20"]
+	path = components/esp32-ds18b20
+	url = https://M10tech@github.com/M10tech/esp32-ds18b20

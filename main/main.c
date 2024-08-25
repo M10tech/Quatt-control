@@ -13,6 +13,9 @@
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "ds18b20.h"
+#include "onewire_bus.h"
+#include "math.h" //for NAN
 
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
@@ -25,6 +28,7 @@
 #define OT0_RECV_PIN  GPIO_NUM_34
 #define OT1_RECV_PIN  GPIO_NUM_35
 #define OT2_RECV_PIN  GPIO_NUM_NC
+#define ONE_WIRE_PIN  GPIO_NUM_25
 
 #define BEAT 10 //in seconds
 #define SENSORS 3
@@ -35,6 +39,67 @@
 #define RW 5 //return water temp
 #define DW 8 //domestic home water temp
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
+
+void temp_task(void *argv) {
+    int ids[SENSORS],fail=0,sensor_count=0;
+    onewire_bus_handle_t bus; // install new 1-wire bus
+    onewire_bus_config_t bus_config = {.bus_gpio_num = ONE_WIRE_PIN,};
+    onewire_bus_rmt_config_t rmt_config = {.max_rx_bytes = 10,}; //1byte ROM command + 8byte ROM number + 1byte device command
+    
+    ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
+    UDPLUS("1-Wire bus installed on GPIO%d\n", ONE_WIRE_PIN);
+
+    ds18b20_device_handle_t ds18b20s[SENSORS];
+    onewire_device_iter_handle_t iter = NULL;
+    onewire_device_t next_onewire_device;
+    esp_err_t search_result = ESP_OK;
+
+    do {ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter)); //create 1-wire device iterator, which is used for device search
+        do {search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
+            if (search_result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
+                ds18b20_config_t ds_cfg = {};
+                if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[sensor_count]) == ESP_OK) {
+                    // The DS18B20 address 64-bit and my batch turns out family C on https://github.com/cpetrich/counterfeit_DS18B20
+                    // I have manually selected that I have unique ids using the second hex digit of CRC
+                    ids[sensor_count]=(next_onewire_device.address>>56)&0xF;
+                    UDPLUS("Found a DS18B20[%d], address: %016llX, id: %X\n", sensor_count, next_onewire_device.address, ids[sensor_count]);
+                    sensor_count++;
+                    if (sensor_count >= SENSORS) break;
+                }
+            }
+        } while (search_result != ESP_ERR_NOT_FOUND);
+        UDPLUS("Found %d DS18B20 device(s)\n", sensor_count);
+        if (sensor_count>=SENSORS) break;
+        
+        for (int i=0; i<sensor_count; i++) ds18b20_del_device(ds18b20s[i]);
+        onewire_bus_reset(bus);
+        ESP_ERROR_CHECK(onewire_del_device_iter(iter));
+        if (fail++>50) {
+            UDPLUS("restarting because can't find enough sensors\n");
+//             mqtt_client_publish("{\"idx\":%d,\"nvalue\":4,\"svalue\":\"Heater No Sensors\"}", idx);
+            vTaskDelay(3000/portTICK_PERIOD_MS);
+            esp_restart();
+        }
+        vTaskDelay(BEAT*1000/portTICK_PERIOD_MS);
+    } while (true); //break out when all SENSORS are found
+
+    float temperature;
+    int indx=0;
+    while (1) {
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this every second
+        if (indx<sensor_count) {
+            if (ds18b20_trigger_temperature_conversion(ds18b20s[indx]) == ESP_OK) { //has 800ms delay built into the conversion...
+                ESP_ERROR_CHECK(ds18b20_get_temperature(ds18b20s[indx], &temperature)); //get temperature from sensors one by one
+                temp[ids[indx]] = temperature;
+                //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+            } else {
+                temp[ids[indx]] = NAN;
+            }
+            indx++; if (indx>=sensor_count) indx=0;
+        }
+    }
+}
+
 
 int     heat_on=0;
 int     stateflg=0,errorflg=0;
@@ -128,6 +193,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
 }
 
 
+static TaskHandle_t tempTask = NULL;
 int timeIndex=0,pump_off_time=0;
 // int switch_state=0,retrigger=0;
 // int push=-2;
@@ -164,10 +230,10 @@ void vTimerCallback( TimerHandle_t xTimer ) {
 //         cur_heat2.value.int_value= 2;
 //         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
 //     }
-    switch (timeIndex) { //send commands OT0
+    xTaskNotifyGive( tempTask ); //temperature measurement start
+    vTaskDelay(1); //prevent interference between OneWire and OT-receiver
+    switch (timeIndex) { //send commands BOILER
         case 0: //measure temperature
-//             xTaskNotifyGive( tempTask ); //temperature measurement start
-//             vTaskDelay(1); //prevent interference between OneWire and OT-receiver
             message=0x00190000; //25 read boiler water temperature
             break;
         case 1: //execute heater decisions
@@ -323,6 +389,7 @@ void OT_init() {
     }
     OT_recv_init();
     OT_send_init();
+    xTaskCreate(temp_task,"Temp", 4096, NULL, 1, &tempTask);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
 }
@@ -333,6 +400,7 @@ void main_task(void *arg) {
     UDPLUS("\n\nQuatt-control\n");
     
     OT_init();
+    //vTaskDelay(1000/portTICK_PERIOD_MS); //Allow inits to settle
     //esp_intr_dump(NULL);
     
     while (true) {
