@@ -2,6 +2,9 @@ the README
 
 ## version history
 
+### 0.0.6 further stability improvement attempt
+- pin temperature task to core 0 instead of 1
+
 ### 0.0.5 stability improvement attempt
 - version 0.0.4 crashes usually within 1000s
 - version 0.0.3 was rock solid
