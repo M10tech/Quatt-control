@@ -390,7 +390,7 @@ void OT_init() {
     }
     OT_recv_init();
     OT_send_init();
-    xTaskCreatePinnedToCore(temp_task,"Temp", 6144, NULL, 1, &tempTask,0); //TODO: check if needs to be so big or on core 0
+    xTaskCreatePinnedToCore(temp_task,"Temp", 6144, NULL, 1, &tempTask,1); //TODO: check if needs to be so big or on core 1
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
 }

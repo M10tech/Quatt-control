@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.0.7 further stability improvement attempt
+- pin temperature task to core 1 instead of 0
+- v0.0.5 was pinning to available core
+
 ### 0.0.6 further stability improvement attempt
 - pin temperature task to core 0 instead of 1
 
