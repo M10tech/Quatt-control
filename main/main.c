@@ -46,18 +46,18 @@ void temp_task(void *argv) {
     onewire_bus_config_t bus_config = {.bus_gpio_num = ONE_WIRE_PIN,};
     onewire_bus_rmt_config_t rmt_config = {.max_rx_bytes = 10,}; //1byte ROM command + 8byte ROM number + 1byte device command
     
-    ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
+    if (onewire_new_bus_rmt(&bus_config, &rmt_config, &bus)!=ESP_OK) UDPLUS("onewire_new_bus_rmt failed\n");
     UDPLUS("1-Wire bus installed on GPIO%d\n", ONE_WIRE_PIN);
 
     ds18b20_device_handle_t ds18b20s[SENSORS];
     onewire_device_iter_handle_t iter = NULL;
     onewire_device_t next_onewire_device;
-    esp_err_t search_result = ESP_OK;
+    esp_err_t result = ESP_OK;
 
     do {sensor_count=0;
-        ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter)); //create 1-wire device iterator, which is used for device search
-        do {search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
-            if (search_result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
+        if (onewire_new_device_iter(bus, &iter)!=ESP_OK) UDPLUS("onewire_new_device_iter failed\n"); //create 1-wire device iterator, which is used for device search
+        do {result = onewire_device_iter_get_next(iter, &next_onewire_device);
+            if (result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
                 ds18b20_config_t ds_cfg = {};
                 if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[sensor_count]) == ESP_OK) {
                     // The DS18B20 address 64-bit and my batch turns out family C on https://github.com/cpetrich/counterfeit_DS18B20
@@ -68,13 +68,13 @@ void temp_task(void *argv) {
                     if (sensor_count >= SENSORS) break;
                 }
             }
-        } while (search_result != ESP_ERR_NOT_FOUND);
+        } while (result != ESP_ERR_NOT_FOUND);
         UDPLUS("Found %d DS18B20 device(s)\n", sensor_count);
         if (sensor_count>=SENSORS) break;
         
         for (int i=0; i<sensor_count; i++) ds18b20_del_device(ds18b20s[i]);
         onewire_bus_reset(bus);
-        ESP_ERROR_CHECK(onewire_del_device_iter(iter));
+        if (onewire_del_device_iter(iter)!=ESP_OK) UDPLUS("onewire_del_device_iter failed\n");
         if (fail++>50) {
             UDPLUS("restarting because can't find enough sensors\n");
 //             mqtt_client_publish("{\"idx\":%d,\"nvalue\":4,\"svalue\":\"Heater No Sensors\"}", idx);
@@ -89,12 +89,19 @@ void temp_task(void *argv) {
     while (1) {
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this every second
         if (indx<sensor_count) {
-            if (ds18b20_trigger_temperature_conversion(ds18b20s[indx]) == ESP_OK) { //has 800ms delay built into the conversion...
-                ESP_ERROR_CHECK(ds18b20_get_temperature(ds18b20s[indx], &temperature)); //get temperature from sensors one by one
-                temp[ids[indx]] = temperature;
-                //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+            if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
+                if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
+                    temp[ids[indx]] = temperature;
+                    //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+                } else {
+                    UDPLUS("ds18b20_get_temperature error %x: %s\n",result,esp_err_to_name(result));
+                    temp[ids[indx]] = NAN;
+                    onewire_bus_reset(bus);
+                }
             } else {
+                UDPLUS("ds18b20_trigger_temperature_conversion error %x: %s\n",result,esp_err_to_name(result));
                 temp[ids[indx]] = NAN;
+                onewire_bus_reset(bus);
             }
             indx++; if (indx>=sensor_count) indx=0;
         }
@@ -131,12 +138,12 @@ void send_OT_frame(int ch, uint32_t payload) {
     }
     if (even%2) SETONE(1); else SETZERO(1); //parity bit
     //transmit the dma_buf once
-    ESP_ERROR_CHECK(i2s_channel_preload_data(tx_chan[ch], dma_buf, BUFF_SIZE*sizeof(uint32_t), &bytes_loaded));
-    ESP_ERROR_CHECK(i2s_channel_enable(tx_chan[ch])); //Enable the TX channel
+    if (i2s_channel_preload_data(tx_chan[ch], dma_buf, BUFF_SIZE*sizeof(uint32_t), &bytes_loaded)!=ESP_OK) UDPLUS("i2s_channel_preload_data failed\n");
+    if (i2s_channel_enable(tx_chan[ch])!=ESP_OK) UDPLUS("i2s_channel_enable failed\n"); //Enable the TX channel
     vTaskDelay(30/portTICK_PERIOD_MS); //message is 34ms
     ot_recv_enable[ch]=true;
     vTaskDelay(20/portTICK_PERIOD_MS); //message is 34ms so total 50ms is enough
-    ESP_ERROR_CHECK(i2s_channel_disable(tx_chan[ch])); //Disable the TX channel
+    if (i2s_channel_disable(tx_chan[ch])!=ESP_OK) UDPLUS("i2s_channel_disable failed\n"); //Disable the TX channel
 }
 
 #define  IDLE  0
@@ -231,8 +238,10 @@ void vTimerCallback( TimerHandle_t xTimer ) {
 //         cur_heat2.value.int_value= 2;
 //         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
 //     }
-    xTaskNotifyGive( tempTask ); //temperature measurement start
-    vTaskDelay(1); //prevent interference between OneWire and OT-receiver
+    if (timeIndex%3==1) { //trigger at 1, 4 and 7s so more time to finish temp reading and each sensor is read once a BEAT
+        xTaskNotifyGive( tempTask ); //temperature measurement start
+        vTaskDelay(1); //TODO: is this needed: prevent interference between OneWire and OT-receiver
+    }
     switch (timeIndex) { //send commands BOILER
         case 0: //measure temperature
             message=0x00190000; //25 read boiler water temperature
@@ -375,9 +384,9 @@ void OT_send_init() { //note that idle voltage is zero and cannot be flipped
         .gpio_cfg = {.mclk=I2S_GPIO_UNUSED, .bclk=I2S_GPIO_UNUSED, .ws=I2S_GPIO_UNUSED, .din=I2S_GPIO_UNUSED, },
     };
     for (int i=0;i<OTNUM;i++) {
-        ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_chan[i], NULL)); //no Rx
+        if (i2s_new_channel(&tx_chan_cfg, &tx_chan[i], NULL)!=ESP_OK) UDPLUS("i2s_new_channel failed\n"); //no Rx
         tx_std_cfg.gpio_cfg.dout=ot_send_pin[i];
-        ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan[i], &tx_std_cfg));
+        if (i2s_channel_init_std_mode(tx_chan[i], &tx_std_cfg)!=ESP_OK) UDPLUS("i2s_channel_init_std_mode failed\n");
     }
 }
 
@@ -390,7 +399,7 @@ void OT_init() {
     }
     OT_recv_init();
     OT_send_init();
-    xTaskCreatePinnedToCore(temp_task,"Temp", 6144, NULL, 1, &tempTask,1); //TODO: check if needs to be so big or on core 1
+    xTaskCreate(temp_task,"Temp", 4096, NULL, 1, &tempTask);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
 }

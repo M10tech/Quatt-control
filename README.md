@@ -2,6 +2,14 @@ the README
 
 ## version history
 
+### 0.0.8 get rid of ESP_ERROR_CHECK
+- revert previous attempts as unneeded
+- This is bad programming as admitted by espressif
+- "Many ESP-IDF examples use ESP_ERROR_CHECK to handle errors from various APIs.
+  This is not the best practice for applications, and is done to make example code more concise"
+- reset bus on bad readings
+- remove console colors
+
 ### 0.0.7 further stability improvement attempt
 - pin temperature task to core 1 instead of 0
 - v0.0.5 was pinning to available core
