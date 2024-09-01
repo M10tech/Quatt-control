@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.0.9 introduced MQTT and SINKBUS
+- skeleton MQTT code, needs refinement
+- SINKBUS puts one-wire bus down for 9 seconds
+- to battle the stuck ds18b20 issue
+
 ### 0.0.8 get rid of ESP_ERROR_CHECK
 - revert previous attempts as unneeded
 - This is bad programming as admitted by espressif

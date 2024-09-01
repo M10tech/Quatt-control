@@ -16,6 +16,8 @@
 #include "ds18b20.h"
 #include "onewire_bus.h"
 #include "math.h" //for NAN
+#include "esp_ota_ops.h" //for esp_app_get_description
+#include "mqtt-client.h"
 
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
@@ -30,6 +32,34 @@
 #define OT2_RECV_PIN  GPIO_NUM_NC
 #define ONE_WIRE_PIN  GPIO_NUM_25
 
+int idx=68; //the domoticz base index
+#define PUBLISH(name) do {int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"%.2f\"}", idx+name##_ix, name##_fv); \
+                            if (n<0) UDPLUS("MQTT publish of %s failed because %s\n",#name,MQTT_CLIENT_ERROR(n)); \
+                           } while(0)
+#define tgt_temp1_fv tgt_temp1.value.float_value
+#define tgt_temp1_ix 1
+#define tgt_temp2_fv tgt_temp2.value.float_value
+#define tgt_temp2_ix 2
+#define     S1avg_fv S1avg
+#define     S1avg_ix 3
+#define     S2avg_fv S2avg
+#define     S2avg_ix 4
+#define  heat_mod_fv heat_mod
+#define  heat_mod_ix 5
+#define   heat_sp_fv heat_sp
+#define   heat_sp_ix 6
+#define   burnerW_fv temp[BW]
+#define   burnerW_ix 7
+#define   returnW_fv temp[RW]
+#define   returnW_ix 8
+#define  pressure_fv pressure*10.0
+#define  pressure_ix 9
+#define     S3avg_fv S3avg
+#define     S3avg_ix 10
+#define    S3long_fv S3long
+#define    S3long_ix 11
+
+
 #define BEAT 10 //in seconds
 #define SENSORS 3
 #define S1 0 //   salon temp sensor
@@ -39,7 +69,9 @@
 #define RW 5 //return water temp
 #define DW 8 //domestic home water temp
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
+float S1temp[6],S2temp[6],S3temp[6],S1avg,S2avg,S3avg;
 
+#define SINKBUS(time) do {gpio_set_level(ONE_WIRE_PIN,0);vTaskDelay(time/portTICK_PERIOD_MS);gpio_set_level(ONE_WIRE_PIN,1);}while(0)
 void temp_task(void *argv) {
     int ids[SENSORS],fail=0,sensor_count;
     onewire_bus_handle_t bus; // install new 1-wire bus
@@ -54,7 +86,8 @@ void temp_task(void *argv) {
     onewire_device_t next_onewire_device;
     esp_err_t result = ESP_OK;
 
-    do {sensor_count=0;
+    while (true) {
+        sensor_count=0;
         if (onewire_new_device_iter(bus, &iter)!=ESP_OK) UDPLUS("onewire_new_device_iter failed\n"); //create 1-wire device iterator, which is used for device search
         do {result = onewire_device_iter_get_next(iter, &next_onewire_device);
             if (result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
@@ -73,7 +106,7 @@ void temp_task(void *argv) {
         if (sensor_count>=SENSORS) break;
         
         for (int i=0; i<sensor_count; i++) ds18b20_del_device(ds18b20s[i]);
-        onewire_bus_reset(bus);
+        SINKBUS(9000); //long reset one-wire bus
         if (onewire_del_device_iter(iter)!=ESP_OK) UDPLUS("onewire_del_device_iter failed\n");
         if (fail++>50) {
             UDPLUS("restarting because can't find enough sensors\n");
@@ -82,29 +115,30 @@ void temp_task(void *argv) {
             esp_restart();
         }
         vTaskDelay(BEAT*1000/portTICK_PERIOD_MS);
-    } while (true); //break out when all SENSORS are found
+    } //break out when all SENSORS are found
 
     float temperature;
     int indx=0;
     while (1) {
-        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this every second
-        if (indx<sensor_count) {
-            if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
-                if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
-                    temp[ids[indx]] = temperature;
-                    //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
-                } else {
-                    UDPLUS("ds18b20_get_temperature error %x: %s\n",result,esp_err_to_name(result));
-                    temp[ids[indx]] = NAN;
-                    onewire_bus_reset(bus);
-                }
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this 3 x in 10 seconds
+        if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
+            if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
+                temp[ids[indx]] = temperature;
+                //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+//                 int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"%.3f\"}", 345, temperature);
+//                 UDPLUS("n=%d\n",n);
             } else {
-                UDPLUS("ds18b20_trigger_temperature_conversion error %x: %s\n",result,esp_err_to_name(result));
+                UDPLUS("ds18b20_get_temperature for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
                 temp[ids[indx]] = NAN;
-                onewire_bus_reset(bus);
+                SINKBUS(9000); //long reset one-wire bus
+                UDPLUS("after long reset bus\n"); //without depriving a stuck sensor from power for a few seconds, it will stay stuck
             }
-            indx++; if (indx>=sensor_count) indx=0;
+        } else {
+            UDPLUS("ds18b20_trigger_temperature_conversion for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
+            temp[ids[indx]] = NAN;
+            SINKBUS(9000); //long reset one-wire bus
         }
+        indx++; if (indx>=sensor_count) indx=0;
     }
 }
 
@@ -201,6 +235,11 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
 }
 
 
+#define CalcAvg(Sx) do {            Sx##temp[5]=Sx##temp[4];Sx##temp[4]=Sx##temp[3]; \
+            Sx##temp[3]=Sx##temp[2];Sx##temp[2]=Sx##temp[1];Sx##temp[1]=Sx##temp[0]; \
+            if ( !isnan(temp[Sx]) && temp[Sx]!=85 )         Sx##temp[0]=temp[Sx];    \
+            Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5])/6.0; \
+        } while(0)
 static TaskHandle_t tempTask = NULL;
 int timeIndex=0,pump_off_time=0;
 // int switch_state=0,retrigger=0;
@@ -312,9 +351,9 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         ot_recv_enable[BOILER]=false;
     }
     
-//     if (!timeIndex) {
-//         CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
-//     }
+    if (!timeIndex) {
+        CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
+    }
 //     
 //     //errorflg=(seconds/600)%2; //test trick to change outcome every 10 minutes
 //     if (seconds%60==5) {
@@ -336,13 +375,19 @@ void vTimerCallback( TimerHandle_t xTimer ) {
 //      int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"Heater alive %d\"}", idx, seconds/60);    
 //  }
 //  
-//     if (seconds%60==50) { //allow 6 temperature measurments to make sure all info is loaded
+    if (seconds%60==50) { //allow 6 temperature measurments to make sure all info is loaded
+PUBLISH(S1avg);
+PUBLISH(S2avg);
+PUBLISH(S3avg);
+PUBLISH(burnerW);
+PUBLISH(returnW);
+PUBLISH(pressure);
 //         heat_on=0;
 //         cur_heat2.value.int_value=heater(seconds); //sets heat_sp and returns heater result, 0, 1 or 2
 //         if (cur_heat2.value.int_value==2 && pump_off_time>90) cur_heat2.value.int_value=1; //do not retrigger rules yet
 //         if (cur_heat2.value.int_value==1) heat_on=1;
 //         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
-//     }
+    }
 
     if (timeIndex==3) {
         UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f ERR=%02x RW=%4.1f BW=%4.1f POT=%3d ON=%d MOD=%02.0f ST=%02x\n", \
@@ -399,17 +444,29 @@ void OT_init() {
     }
     OT_recv_init();
     OT_send_init();
-    xTaskCreate(temp_task,"Temp", 4096, NULL, 1, &tempTask);
-    xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
-    xTimerStart(xTimer, 0);
+}
+
+mqtt_config_t mqttconf=MQTT_DEFAULT_CONFIG;
+void MQTT_init() {
+    mqttconf.host="192.168.178.5";
+    mqttconf.user="test";
+    mqttconf.pass="test";
+//     mqttconf.queue_size=20;
+    mqttconf.msg_len   =64; //to fit the ALERT
+    mqtt_client_init(&mqttconf);
 }
 
 void main_task(void *arg) {
     udplog_init(3);
     vTaskDelay(300); //Allow Wi-Fi to connect
-    UDPLUS("\n\nQuatt-control\n");
+    UDPLUS("\n\nQuatt-control %s\n",esp_app_get_description()->version);
     
+    MQTT_init();
     OT_init();
+    S1temp[0]=22;S2temp[0]=22;
+    xTaskCreatePinnedToCore(temp_task,"Temp", 4096, NULL, 1, &tempTask,1); //TODO: check if really needed to survive stuck sensor
+    xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
+    xTimerStart(xTimer, 0);
     //vTaskDelay(1000/portTICK_PERIOD_MS); //Allow inits to settle
     //esp_intr_dump(NULL);
     
