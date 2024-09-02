@@ -31,6 +31,7 @@
 #define OT1_RECV_PIN  GPIO_NUM_35
 #define OT2_RECV_PIN  GPIO_NUM_NC
 #define ONE_WIRE_PIN  GPIO_NUM_25
+#define ONE_WIRE_GND  GPIO_NUM_26
 
 int idx=68; //the domoticz base index
 #define PUBLISH(name) do {int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"%.2f\"}", idx+name##_ix, name##_fv); \
@@ -71,8 +72,16 @@ int idx=68; //the domoticz base index
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
 float S1temp[6],S2temp[6],S3temp[6],S1avg,S2avg,S3avg;
 
-#define SINKBUS(time) do {gpio_set_level(ONE_WIRE_PIN,0);vTaskDelay(time/portTICK_PERIOD_MS);gpio_set_level(ONE_WIRE_PIN,1);}while(0)
+#define SINKBUS(time) do {gpio_set_level(ONE_WIRE_GND,1);vTaskDelay(time/portTICK_PERIOD_MS); \
+                          gpio_set_level(ONE_WIRE_GND,0);vTaskDelay(1);} while(0)
 void temp_task(void *argv) {
+    gpio_config_t io_conf = {}; //zero-initialize the config structure
+    io_conf.intr_type = GPIO_INTR_DISABLE; //disable interrupt
+    io_conf.mode = GPIO_MODE_OUTPUT_OD; //set as output mode with open drain
+    io_conf.pin_bit_mask = 1ULL<<ONE_WIRE_GND; //this will serve as the ground for the one-wire and will float when we reset
+    gpio_config(&io_conf); //configure GPIO with the given settings //use gpio_set_drive_capability(x,GPIO_DRIVE_CAP_3)?
+    gpio_set_level(ONE_WIRE_GND,0); //enables ground
+    
     int ids[SENSORS],fail=0,sensor_count;
     onewire_bus_handle_t bus; // install new 1-wire bus
     onewire_bus_config_t bus_config = {.bus_gpio_num = ONE_WIRE_PIN,};
@@ -106,7 +115,7 @@ void temp_task(void *argv) {
         if (sensor_count>=SENSORS) break;
         
         for (int i=0; i<sensor_count; i++) ds18b20_del_device(ds18b20s[i]);
-        SINKBUS(9000); //long reset one-wire bus
+        SINKBUS(2000); //long reset one-wire bus
         if (onewire_del_device_iter(iter)!=ESP_OK) UDPLUS("onewire_del_device_iter failed\n");
         if (fail++>50) {
             UDPLUS("restarting because can't find enough sensors\n");
@@ -130,13 +139,13 @@ void temp_task(void *argv) {
             } else {
                 UDPLUS("ds18b20_get_temperature for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
                 temp[ids[indx]] = NAN;
-                SINKBUS(9000); //long reset one-wire bus
+                SINKBUS(2000); //long reset one-wire bus
                 UDPLUS("after long reset bus\n"); //without depriving a stuck sensor from power for a few seconds, it will stay stuck
             }
         } else {
             UDPLUS("ds18b20_trigger_temperature_conversion for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
             temp[ids[indx]] = NAN;
-            SINKBUS(9000); //long reset one-wire bus
+            SINKBUS(2000); //long reset one-wire bus
         }
         indx++; if (indx>=sensor_count) indx=0;
     }

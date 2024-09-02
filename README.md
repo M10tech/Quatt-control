@@ -2,6 +2,12 @@ the README
 
 ## version history
 
+### 0.0.10 finally fix stuck ds18b20 sensor
+- just telling the 1-wire-pin to ground does not actually work
+- using a second pin as open-drain to become ground terminal for 1-wire
+- when CRC error found, make this float for two seconds and sensor unstuck
+- start reporting to domoticz for real
+
 ### 0.0.9 introduced MQTT and SINKBUS
 - skeleton MQTT code, needs refinement
 - SINKBUS puts one-wire bus down for 9 seconds
