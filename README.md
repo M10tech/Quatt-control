@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.1.0 added homekit outline
+- seems to deliver working code
+- a lot of fine-tuning pending
+- TODO time, RTC, ota_config, ota_api
+
 ### 0.0.10 finally fix stuck ds18b20 sensor
 - just telling the 1-wire-pin to ground does not actually work
 - using a second pin as open-drain to become ground terminal for 1-wire
