@@ -262,7 +262,7 @@ float   curr_mod=0,heat_mod=0,pressure=0;
 int     time_set=0,time_on=0,stateflg=0,errorflg=0;
 int     heat_on=0, boost=0;
 int heater(uint32_t seconds) {
-    if (!time_set) return 0; //need reliable time
+//     if (!time_set) return 0; //need reliable time
     char str[26], strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
 //     struct timeval tv;
 //     gettimeofday(&tv, NULL);

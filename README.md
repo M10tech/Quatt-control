@@ -2,6 +2,9 @@ the README
 
 ## version history
 
+### 0.1.1 remove time dependency
+- while time reference not solved
+
 ### 0.1.0 added homekit outline
 - seems to deliver working code
 - a lot of fine-tuning pending
