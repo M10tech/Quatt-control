@@ -1,0 +1,29 @@
+dependencies:
+  espressif/mdns:
+    component_hash: af6306fe65d637a3683d1cf671508fcedd6b05f9ca029a8815abeab64001fb8d
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.4.0
+  idf:
+    source:
+      type: idf
+    version: 5.3.1
+  wolfssl/wolfssl:
+    component_hash: 959be4312dbd4d469824e4e02ec0e5e5654da4c3f210bd59343f28a3547472d2
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 5.7.2
+direct_dependencies:
+- espressif/mdns
+- idf
+- wolfssl/wolfssl
+manifest_hash: d47976464374b7b669578f4138a5e68237015ac12d96b531015a258a72349328
+target: esp32
+version: 2.0.0
