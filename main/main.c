@@ -8,7 +8,6 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_wifi.h"
-// #include "lcm_api.h"
 #include <homekit/homekit.h>
 #include <homekit/characteristics.h>
 #include "esp_netif_sntp.h"
@@ -74,7 +73,7 @@ int idx=68; //the domoticz base index
 // it can be used in Eve, which will show it, where Home does not
 // and apply the four other parameters in the accessories_information section
 
-#include "ota-api.h"
+#include "lcm_api.h"
 homekit_characteristic_t ota_trigger  = API_OTA_TRIGGER;
 homekit_characteristic_t manufacturer = HOMEKIT_CHARACTERISTIC_(MANUFACTURER,  "X");
 homekit_characteristic_t serial       = HOMEKIT_CHARACTERISTIC_(SERIAL_NUMBER, "1");
@@ -157,6 +156,11 @@ void identify(homekit_value_t _value) {
 /* ============== END HOMEKIT CHARACTERISTIC DECLARATIONS ================================================================= */
 
 
+#define TEMP2HK(n)  do {old_t##n=cur_temp##n.value.float_value; \
+                        cur_temp##n.value.float_value=isnan(temp[S##n])?S##n##avg:(float)(int)(temp[S##n]*10+0.5)/10; \
+                        if (old_t##n!=cur_temp##n.value.float_value) \
+                            homekit_characteristic_notify(&cur_temp##n,HOMEKIT_FLOAT(cur_temp##n.value.float_value)); \
+                    } while (0) //TODO: do we need to test for changed values or is that embedded in notify routine?
 #define BEAT 10 //in seconds
 #define SENSORS 3
 #define S1 0 //   salon temp sensor
@@ -181,6 +185,7 @@ void temp_task(void *argv) {
     gpio_set_level(ONE_WIRE_GND,0); //enables ground
     
     int ids[SENSORS],fail=0,sensor_count;
+    float old_t1,old_t2,old_t3;
     onewire_bus_handle_t bus; // install new 1-wire bus
     onewire_bus_config_t bus_config = {.bus_gpio_num = ONE_WIRE_PIN,};
     onewire_bus_rmt_config_t rmt_config = {.max_rx_bytes = 10,}; //1byte ROM command + 8byte ROM number + 1byte device command
@@ -246,6 +251,9 @@ void temp_task(void *argv) {
             SINKBUS(2000); //long reset one-wire bus
         }
         indx++; if (indx>=sensor_count) indx=0;
+        TEMP2HK(1);
+        TEMP2HK(2);
+        TEMP2HK(3);
     }
 }
 

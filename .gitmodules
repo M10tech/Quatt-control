@@ -10,3 +10,6 @@
 [submodule "components/esp32-homekit"]
 	path = components/esp32-homekit
 	url = https://M10tech@github.com/M10tech/esp32-homekit
+[submodule "components/lcm-api"]
+	path = components/lcm-api
+	url = https://M10tech@github.com/M10tech/lcm-api

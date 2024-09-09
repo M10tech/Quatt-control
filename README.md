@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.1.3 moved ota-api into lcm-api
+- lcm-api is a component (fork)
+- added TEMP2HK macro
+
 ### 0.1.2 added time from SNTP
 - and fixed unterminated string in esp32-homekit upstream
 
