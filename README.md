@@ -2,6 +2,9 @@ the README
 
 ## version history
 
+### 0.1.2 added time from SNTP
+- and fixed unterminated string in esp32-homekit upstream
+
 ### 0.1.1 remove time dependency
 - while time reference not solved
 

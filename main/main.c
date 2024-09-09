@@ -11,6 +11,7 @@
 // #include "lcm_api.h"
 #include <homekit/homekit.h>
 #include <homekit/characteristics.h>
+#include "esp_netif_sntp.h"
 #include <udplogger.h>
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
@@ -258,27 +259,27 @@ int     mode=EVAL,peak_time=15; //after update, evaluate only 15 minutes
 float   peak_temp=0,prev_setp=DEFAULT1,setpoint2=DEFAULT2,hystsetpoint2=DEFAULT2,heat_sp=35;
 float   stable_tgt_temp1=DEFAULT1, past_tgt_temp1[PAST_TGT_N];
 float   curr_mod=0,heat_mod=0,pressure=0;
-// time_t  heat_till=0;
+time_t  heat_till=0;
 int     time_set=0,time_on=0,stateflg=0,errorflg=0;
 int     heat_on=0, boost=0;
 int heater(uint32_t seconds) {
-//     if (!time_set) return 0; //need reliable time
+    if (!time_set) return 0; //need reliable time
     char str[26], strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
-//     struct timeval tv;
-//     gettimeofday(&tv, NULL);
-//     time_t now=tv.tv_sec;
-//     struct tm *tm = localtime(&now);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    time_t now=tv.tv_sec;
+    struct tm *tm = localtime(&now);
 
-//     if ( (tm->tm_hour==22 || tm->tm_hour==7) && S3samples>360 ) {
-//         float S3long=S3total/S3samples;
-//         PUBLISH(S3long);
-//         S3samples=0;S3total=0;
-//         PUBLISH(tgt_temp1); //to refresh the report to MQTT because this setpoint almost never changes
-//     }
+    if ( (tm->tm_hour==22 || tm->tm_hour==7) && S3samples>360 ) {
+        float S3long=S3total/S3samples;
+        PUBLISH(S3long);
+        S3samples=0;S3total=0;
+        PUBLISH(tgt_temp1); //to refresh the report to MQTT because this setpoint almost never changes
+    }
 
     int eval_time=0,heater1=0,heater2=0;
-//     sprintf(strtm,"DST%dwd%dyd%-3d %2d|%02d:%02d:%02d.%06d",tm->tm_isdst,tm->tm_wday,tm->tm_yday,tm->tm_mday,
-//             tm->tm_hour,tm->tm_min,tm->tm_sec,(int)tv.tv_usec);
+    sprintf(strtm,"DST%dwd%dyd%-3d %2d|%02d:%02d:%02d.%06d",tm->tm_isdst,tm->tm_wday,tm->tm_yday,tm->tm_mday,
+            tm->tm_hour,tm->tm_min,tm->tm_sec,(int)tv.tv_usec);
     //heater2 logic
     if (tgt_temp2.value.float_value>setpoint2) setpoint2+=0.0625; //slow adjust up
     if (tgt_temp2.value.float_value<setpoint2) setpoint2-=0.0625; //slow adjust down
@@ -329,38 +330,38 @@ int heater(uint32_t seconds) {
         if (S1avg<peak_temp) peak_time++; //double fast countdown if S1Avg temp < peak temp
     }
     if (mode==STABLE) {
-//         if (tm->tm_hour<7 || tm->tm_hour>=22) { //night time preparing for morning warmup
-//             time_on=(ffactor*(setpoint1-S1avg));
-//             heat_till=now+(time_on*60)-2;               // -2 makes switch off moment more logical
-//             struct tm *seven02 = localtime(&now);       // some bizar leaking of values between tm and seven02
-//             if (tm->tm_hour>=22) seven02->tm_mday++;                  // 7:02 AM is tomorrow
-//             seven02->tm_hour=7; seven02->tm_min=2; seven02->tm_sec=0; //  :02 makes transition for heater 2 better
-//             if (heat_till>mktime(seven02)) mode=HEAT;
-//         } else { //daytime control
+        if (tm->tm_hour<7 || tm->tm_hour>=22) { //night time preparing for morning warmup
+            time_on=(ffactor*(setpoint1-S1avg));
+            heat_till=now+(time_on*60)-2;               // -2 makes switch off moment more logical
+            struct tm *seven02 = localtime(&now);       // some bizar leaking of values between tm and seven02
+            if (tm->tm_hour>=22) seven02->tm_mday++;                  // 7:02 AM is tomorrow
+            seven02->tm_hour=7; seven02->tm_min=2; seven02->tm_sec=0; //  :02 makes transition for heater 2 better
+            if (heat_till>mktime(seven02)) mode=HEAT;
+        } else { //daytime control
             time_on=(ffactor*(setpoint1-S1avg)*0.3);
-//             heat_till=now+(time_on*60)-2;
+            heat_till=now+(time_on*60)-2;
             if (time_on>5) mode=HEAT; //5 minutes at least, else too quick and allows fixes of 1/16th degree C
-//         }
+        }
     }
     if (mode==HEAT) {
-//         if (now>heat_till) {
+        if (now>heat_till) {
             time_on=0;
             mode=EVAL;
             peak_temp=S1avg;
             peak_time=0;
-//         } else if ( setpoint1-S1avg>0 ){
-            if (heat_mod) time_on--; //  else heat_till+=60; //only when burner on, count progress else shift end time
+        } else if ( setpoint1-S1avg>0 ){
+            if (heat_mod) time_on--; else heat_till+=60; //only when burner on, count progress else shift end time
             heater1=1;
-//         } else {
+        } else {
             mode=STABLE;
-//         }
+        }
     }
     
     //integrated logic for both heaters
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
-//     ctime_r(&heat_till,str);str[16]=0; str[5]=str[10]=' ';str[6]='t';str[7]='i';str[8]=str[9]='l'; // " till hh:mm"
+    ctime_r(&heat_till,str);str[16]=0; str[5]=str[10]=' ';str[6]='t';str[7]='i';str[8]=str[9]='l'; // " till hh:mm"
     if (time_on<0) time_on=0;
     UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f f=%6.1f time-on=%3d peak_temp=%7.4f peak_time=%2d<%2d ST=%02x mode=%d%s\n", \
             S1avg,S2avg,S3avg,ffactor,time_on,peak_temp,peak_time,eval_time,stateflg,mode,(mode==1)?(str+5):"");
@@ -389,6 +390,42 @@ int heater(uint32_t seconds) {
 //                           WRITE_PERI_REG(RTC_ADDR+44,S3samples); //int
 //                           WRITE_PERI_REG(RTC_ADDR   ,RTC_MAGIC);
     return result;
+}
+
+void init_task(void *argv) {
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+//     printf("RTC: "); for (int i=0;i<7;i++) printf("%08x ",READ_PERI_REG(RTC_ADDR+i*4)); printf("\n");
+//     uint32_t *dp;
+// 	if (READ_PERI_REG(RTC_ADDR)==RTC_MAGIC) {
+// 	    mode                    =READ_PERI_REG(RTC_ADDR+ 4);
+//         heat_till               =READ_PERI_REG(RTC_ADDR+ 8);
+//         dp=(void*)&ffactor;  *dp=READ_PERI_REG(RTC_ADDR+12); factor.value.int_value=ffactor;
+//         dp=(void*)&prev_setp;*dp=READ_PERI_REG(RTC_ADDR+16);
+//         dp=(void*)&peak_temp;*dp=READ_PERI_REG(RTC_ADDR+20);
+//         peak_time               =READ_PERI_REG(RTC_ADDR+24);
+//         dp=(void*)&(tgt_temp1.value.float_value);*dp=READ_PERI_REG(RTC_ADDR+28);
+//         dp=(void*)&(tgt_temp2.value.float_value);*dp=READ_PERI_REG(RTC_ADDR+32);
+//         dp=(void*)&setpoint2;*dp=READ_PERI_REG(RTC_ADDR+36);
+//         dp=(void*)&S3total;  *dp=READ_PERI_REG(RTC_ADDR+40);
+//         S3samples               =READ_PERI_REG(RTC_ADDR+44);
+//     }
+//     printf("INITIAL prev_setp=%2.1f f=%2.1f peak_time=%2d peak_temp=%2.4f mode=%d heat_till %s",
+//             prev_setp,ffactor,peak_time,peak_temp,mode,ctime(&heat_till));
+    PUBLISH(tgt_temp1);
+    PUBLISH(tgt_temp2);
+    for (int i=0; i<PAST_TGT_N; i++) past_tgt_temp1[i]=tgt_temp1.value.float_value;
+    S1temp[0]=22;S2temp[0]=22;
+    
+    setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1); tzset();
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    esp_netif_sntp_init(&config);
+    while (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) != ESP_OK) {
+        UDPLUS("Still waiting for system time to sync\n");
+    }
+    time_t ts = time(NULL);
+    UDPLUS("TIME SET: %u=%s\n", (unsigned int) ts, ctime(&ts));
+    time_set=1;
+    vTaskDelete(NULL);
 }
 
 static int                 ot_send_pin[OTNUM],ot_recv_pin[OTNUM];
@@ -700,8 +737,8 @@ void MQTT_init() {
 }
 
 
-
-
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverride-init"
 homekit_accessory_t *accessories[] = {
     HOMEKIT_ACCESSORY(
         .id=1,
@@ -781,6 +818,7 @@ homekit_accessory_t *accessories[] = {
         }),
     NULL
 };
+#pragma GCC diagnostic pop
 
 homekit_server_config_t config = {
     .accessories = accessories,
@@ -798,6 +836,7 @@ void main_task(void *arg) {
     OT_init();
     S1temp[0]=22;S2temp[0]=22;
     xTaskCreatePinnedToCore(temp_task,"Temp", 4096, NULL, 1, &tempTask,1); //TODO: check if really needed to survive stuck sensor
+    xTaskCreate(init_task,"Time", 2048, NULL, 6, NULL);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
     //vTaskDelay(1000/portTICK_PERIOD_MS); //Allow inits to settle
