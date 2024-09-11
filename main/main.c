@@ -251,6 +251,7 @@ void temp_task(void *argv) {
             SINKBUS(2000); //long reset one-wire bus
         }
         indx++; if (indx>=sensor_count) indx=0;
+        if (!isnan(temp[S3]) && temp[S3]!=85) S3samples++,S3total+=temp[S3];
         TEMP2HK(1);
         TEMP2HK(2);
         TEMP2HK(3);
@@ -545,10 +546,10 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     UDPLUS("St%d Sw%d @%ld ",timeIndex,switch_on,seconds);
     if (timeIndex==3) { // allow 3 seconds for two automation rules to succeed and repeat every 10 seconds
         if (pump_off_time) pump_off_time-=10;
-        if (tgt_heat1.value.int_value==2) { //Pump Off rule confirmed
+        if (tgt_heat1.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_COOL) { //Pump Off rule confirmed
             cur_heat2.value.int_value= 1;   //confirm we are heating upstairs
             homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
-            tgt_heat1.value.int_value= 3;   //set heater 1 mode back to auto and be ready for another trigger
+            tgt_heat1.value.int_value= HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO;   //set heater 1 mode back to auto and be ready for another trigger
             homekit_characteristic_notify(&tgt_heat1,HOMEKIT_UINT8(tgt_heat1.value.int_value)); //TODO: racecondition?
             pump_off_time=180; //seconds
             heat_on=1;
@@ -573,30 +574,29 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             message=0x00190000; //25 read boiler water temperature
             break;
         case 1: //execute heater decisions
-            if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x10014b00; //75 deg //1  CH setpoint in deg C
-            } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
+            } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
                    message=0x10010000|(uint32_t)(heat_sp*256);
             } else message=0x10010000|(uint32_t)(tgt_temp1.value.float_value*2-1)*256; //range from 19 - 75 deg
             break;
         case 2:
-            if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                 if (tgt_temp2.value.float_value>17) message=0x100e0000|(uint32_t)(4*tgt_temp2.value.float_value-52)*256; //18-100%
                 else message=0x100e1100; //17%
             } else   message=0x100e6400; //100% //14 max modulation level
             break;
         case 3:
-            if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x00000200|(switch_on?0x100:0x000); //0  enable CH and DHW
-            } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
+            } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
                    message=0x00000200|(  heat_on?0x100:0x000);
             } else message=0x00000200|(tgt_heat1.value.int_value<<8);
             break; 
         case 4:
-            if (tgt_heat2.value.int_value==2) { //test BLOR
+            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_COOL) { //test BLOR
                    message=0x10040100; //4.1  BoilerLockOutReset
             } else message=0x00380000; //56 DHW setpoint write
-            message=0x00380000;
             break;
         case 5: message=0x00050000; break; //5  app specific fault flags
         case 6: message=0x00120000; break; //18 CH water pressure

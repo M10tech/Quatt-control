@@ -2,6 +2,12 @@ the README
 
 ## version history
 
+### 0.2.0 conversion of dual-heater-opentherm complete
+- ported this from ESP8266 code to my ESP32 code
+- ready for new adventures
+- pending: RTC memory, current code seems rock solid as it is
+- pending: pinger, add later, if at all
+
 ### 0.1.4 ota_string, ota-api functions and MQTT return
 - parse ota_string for MQTT config
 - ota-api functions now ESP ported
