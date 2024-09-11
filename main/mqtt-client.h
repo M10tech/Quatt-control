@@ -18,8 +18,8 @@ typedef struct mqtt_config {
     char *pass;
     char *topic;
 } mqtt_config_t;
-#define MQTT_DEFAULT_CONFIG {0,3,48,NULL,1883,NULL,NULL,"domoticz/in"}
-#define MQTT_CLIENT_ERROR(ret)    (ret==-1?"queue full":"message too long")
+#define MQTT_DEFAULT_CONFIG {0,20,64,NULL,1883,NULL,NULL,"domoticz/in"}
+#define MQTT_CLIENT_ERROR(ret)    (ret==-1?"queue full":ret==-2?"message too long":"general MQTT error")
 
 void mqtt_client_init(mqtt_config_t *config);
 int  mqtt_client_publish(char *format,  ...);

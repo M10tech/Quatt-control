@@ -12,10 +12,7 @@ static esp_mqtt_client_handle_t client;
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
-//     UDPLUS("Event dispatched from event loop base=%s, event_id=%" PRIi32 "\n", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
-//     esp_mqtt_client_handle_t client = event->client;
-//     int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         UDPLUS("MQTT_EVENT_CONNECTED\n");
@@ -23,20 +20,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
         UDPLUS("MQTT_EVENT_DISCONNECTED\n");
         break;
-
-    case MQTT_EVENT_SUBSCRIBED:
-        UDPLUS("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        UDPLUS("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
-        break;
     case MQTT_EVENT_PUBLISHED:
         UDPLUS("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        UDPLUS("MQTT_EVENT_DATA\n");
-        UDPLUS("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        UDPLUS("DATA=%.*s\r\n", event->data_len, event->data);
         break;
     case MQTT_EVENT_ERROR:
         UDPLUS("MQTT_EVENT_ERROR\n");
@@ -59,20 +44,23 @@ int mqtt_client_publish(char *format, ...) {
     int n=vsnprintf(msg, mqttconf->msg_len,format,args);
     va_end(args);
     if (n>=mqttconf->msg_len) return -2; //truncated message
-    esp_mqtt_client_enqueue(client, mqttconf->topic, msg, 0, 1, 0, true);
-//      return -1; //message queue full
+    int res=esp_mqtt_client_enqueue(client, mqttconf->topic, msg, 0, 1, 0, true);
+    if (res==-2) {
+        return -1; //message queue full
+    } else if (res==-1) {
+        return -3; //general error
+    }
     return n;
 }
 
 void mqtt_client_init(mqtt_config_t *config) {
     mqttconf=config;
-
+    char uri[128];
+    snprintf(uri,128,"mqtt://%s:%s@%s", mqttconf->user, mqttconf->pass, mqttconf->host);
     const esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://test:test@192.168.178.5",
+        .broker.address.uri = uri,
     };
     client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
     esp_mqtt_client_start(client);
-
-//     publish_queue = xQueueCreate(mqttconf->queue_size, mqttconf->msg_len);
 }

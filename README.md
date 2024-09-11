@@ -2,6 +2,13 @@ the README
 
 ## version history
 
+### 0.1.4 ota_string, ota-api functions and MQTT return
+- parse ota_string for MQTT config
+- ota-api functions now ESP ported
+- MQTT return value now works
+- names of accessories updated
+- included remaining timer call items
+
 ### 0.1.3 moved ota-api into lcm-api
 - lcm-api is a component (fork)
 - added TEMP2HK macro

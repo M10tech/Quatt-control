@@ -529,8 +529,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
             Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5])/6.0; \
         } while(0)
 static TaskHandle_t tempTask = NULL;
-int timeIndex=0,pump_off_time=0;
-int switch_state=0,retrigger=0;
+int timeIndex=0,switch_state=0,pump_off_time=0,retrigger=0;
 int push=-2;
 TimerHandle_t xTimer;
 void vTimerCallback( TimerHandle_t xTimer ) {
@@ -574,11 +573,11 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             message=0x00190000; //25 read boiler water temperature
             break;
         case 1: //execute heater decisions
-//             if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
+            if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
                    message=0x10014b00; //75 deg //1  CH setpoint in deg C
-//             } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
-//                    message=0x10010000|(uint32_t)(heat_sp*256);
-//             } else message=0x10010000|(uint32_t)(tgt_temp1.value.float_value*2-1)*256; //range from 19 - 75 deg
+            } else if (tgt_heat2.value.int_value==3) { //run heater algoritm for floor heating
+                   message=0x10010000|(uint32_t)(heat_sp*256);
+            } else message=0x10010000|(uint32_t)(tgt_temp1.value.float_value*2-1)*256; //range from 19 - 75 deg
             break;
         case 2:
             if (tgt_heat2.value.int_value==1) { //use on/off switching thermostat
@@ -594,9 +593,9 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             } else message=0x00000200|(tgt_heat1.value.int_value<<8);
             break; 
         case 4:
-//             if (tgt_heat2.value.int_value==2) { //test BLOR
-//                    message=0x10040100; //4.1  BoilerLockOutReset
-//             } else message=0x00380000; //56 DHW setpoint write
+            if (tgt_heat2.value.int_value==2) { //test BLOR
+                   message=0x10040100; //4.1  BoilerLockOutReset
+            } else message=0x00380000; //56 DHW setpoint write
             message=0x00380000;
             break;
         case 5: message=0x00050000; break; //5  app specific fault flags
@@ -735,15 +734,32 @@ void switch_init() { //reads a NormallyOpen contact from Quatt CiC to switch on 
 }
 
 mqtt_config_t mqttconf=MQTT_DEFAULT_CONFIG;
-void MQTT_init() {
-    mqttconf.host="192.168.178.5";
-    mqttconf.user="test";
-    mqttconf.pass="test";
-//     mqttconf.queue_size=20;
-    mqttconf.msg_len   =64; //to fit the ALERT
-    mqtt_client_init(&mqttconf);
+char error[]="error";
+static void ota_string() {
+    char *dmtczbaseidx1=NULL;
+    esp_err_t status;
+    nvs_handle_t lcm_handle;
+    char *otas=NULL;
+    size_t  size;
+    status = nvs_open("LCM", NVS_READONLY, &lcm_handle);
+    
+    if (!status && nvs_get_str(lcm_handle, "ota_string", NULL, &size) == ESP_OK) {
+        otas = malloc(size);
+        nvs_get_str(lcm_handle, "ota_string", otas, &size);
+        mqttconf.host=strtok(otas,";");
+        mqttconf.user=strtok(NULL,";");
+        mqttconf.pass=strtok(NULL,";");
+        dmtczbaseidx1=strtok(NULL,";");
+        //pinger_target=strtok(NULL,";");
+    }
+    if (mqttconf.host==NULL) mqttconf.host=error;
+    if (mqttconf.user==NULL) mqttconf.user=error;
+    if (mqttconf.pass==NULL) mqttconf.pass=error;
+    if (dmtczbaseidx1==NULL) idx=1000; else idx=atoi(dmtczbaseidx1);
+    //if (pinger_target==NULL) pinger_target=error;
+    //pinger_target="192.168.178.100";
+    //DO NOT free the otas since it carries the config pieces
 }
-
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverride-init"
@@ -754,7 +770,7 @@ homekit_accessory_t *accessories[] = {
         .services=(homekit_service_t*[]){
             HOMEKIT_SERVICE(ACCESSORY_INFORMATION,
                 .characteristics=(homekit_characteristic_t*[]){
-                    HOMEKIT_CHARACTERISTIC(NAME, "Heater"),
+                    HOMEKIT_CHARACTERISTIC(NAME, "OutdoorT"),
                     &manufacturer,
                     &serial,
                     &model,
@@ -764,7 +780,7 @@ homekit_accessory_t *accessories[] = {
                 }),
             HOMEKIT_SERVICE(TEMPERATURE_SENSOR, .primary=true,
                 .characteristics=(homekit_characteristic_t*[]){
-                    HOMEKIT_CHARACTERISTIC(NAME, "Outdoor T"),
+                    HOMEKIT_CHARACTERISTIC(NAME, "OutdoorT"),
                     &cur_temp3,
                     &ota_trigger,
                     &factor,
@@ -778,7 +794,7 @@ homekit_accessory_t *accessories[] = {
         .services=(homekit_service_t*[]){
             HOMEKIT_SERVICE(ACCESSORY_INFORMATION,
                 .characteristics=(homekit_characteristic_t*[]){
-                    HOMEKIT_CHARACTERISTIC(NAME, "Heater"),
+                    HOMEKIT_CHARACTERISTIC(NAME, "Thermostat"),
                     &manufacturer,
                     &serial,
                     &model,
@@ -804,7 +820,7 @@ homekit_accessory_t *accessories[] = {
         .services=(homekit_service_t*[]){
             HOMEKIT_SERVICE(ACCESSORY_INFORMATION,
                 .characteristics=(homekit_characteristic_t*[]){
-                    HOMEKIT_CHARACTERISTIC(NAME, "Heater"),
+                    HOMEKIT_CHARACTERISTIC(NAME, "Thermo2"),
                     &manufacturer,
                     &serial,
                     &model,
@@ -814,7 +830,7 @@ homekit_accessory_t *accessories[] = {
                 }),
             HOMEKIT_SERVICE(THERMOSTAT, .primary=true,
                 .characteristics=(homekit_characteristic_t*[]){
-                    HOMEKIT_CHARACTERISTIC(NAME, "Thermo 2"),
+                    HOMEKIT_CHARACTERISTIC(NAME, "Thermo2"),
                     &tgt_heat2,
                     &cur_heat2,
                     &tgt_temp2,
@@ -839,7 +855,10 @@ void main_task(void *arg) {
     vTaskDelay(300); //Allow Wi-Fi to connect
     UDPLUS("\n\nQuatt-control %s\n",esp_app_get_description()->version);
     
-    MQTT_init();
+    //nvs_handle_t lcm_handle;nvs_open("LCM", NVS_READWRITE, &lcm_handle);nvs_set_str(lcm_handle,"ota_string", "192.168.178.5;test;test;68");
+    //nvs_commit(lcm_handle); //can be used if not using LCM
+    ota_string();
+    mqtt_client_init(&mqttconf);
     switch_init();
     OT_init();
     S1temp[0]=22;S2temp[0]=22;
@@ -850,12 +869,9 @@ void main_task(void *arg) {
     //vTaskDelay(1000/portTICK_PERIOD_MS); //Allow inits to settle
     //esp_intr_dump(NULL);
     
-    manufacturer.value.string_value="M10tech"; //cheat line
-    serial.value.string_value="1234"; //cheat line
-    model.value.string_value="Quatt-control"; //cheat line
     int c_hash=ota_read_sysparam(&manufacturer.value.string_value,&serial.value.string_value,
                                       &model.value.string_value,&revision.value.string_value);
-    c_hash=1; revision.value.string_value="0.0.1"; //cheat line
+//     c_hash=1; revision.value.string_value="0.0.1"; //cheat line
     config.accessories[0]->config_number=c_hash;
     
     homekit_server_init(&config);
