@@ -2,6 +2,9 @@ the README
 
 ## version history
 
+### 0.2.3 brackets my friend
+- in a macro, ALWAYS put the input between brackets!
+
 ### 0.2.2 OT float conversion and mode correction
 - conversion of float to OT f8.8 format fixed
 - made that a macro

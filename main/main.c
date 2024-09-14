@@ -537,7 +537,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
             if ( !isnan(temp[Sx]) && temp[Sx]!=85 )         Sx##temp[0]=temp[Sx];    \
             Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5])/6.0; \
         } while(0)
-#define FLOAT2OT(f) (((uint32_t)(f*256*256.0))>>8)
+#define FLOAT2OT(f) (((uint32_t)((f)*256*256.0))>>8)
 static TaskHandle_t tempTask = NULL;
 int timeIndex=0,switch_state=0,pump_off_time=0,retrigger=0;
 int push=-2;
