@@ -2,6 +2,8 @@ the README
 
 ## version history
 
+### 0.2.4 swap channels again
+
 ### 0.2.3 brackets my friend
 - in a macro, ALWAYS put the input between brackets!
 

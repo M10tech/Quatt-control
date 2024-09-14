@@ -24,8 +24,8 @@
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
 #define OTNUM         2 //number of OpenTherm channels, max 3 for ESP32P4
-#define HEATPUMP      0
-#define BOILER        1
+#define BOILER        0
+#define HEATPUMP      1
 #define OT0_SEND_PIN  GPIO_NUM_32
 #define OT1_SEND_PIN  GPIO_NUM_33
 #define OT2_SEND_PIN  GPIO_NUM_NC
