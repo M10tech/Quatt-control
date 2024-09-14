@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.2.2 OT float conversion and mode correction
+- conversion of float to OT f8.8 format fixed
+- made that a macro
+- tgt_heat2 start value should be HEAT
+
 ### 0.2.1 heatpump OT commands and test 2nd channel
 - based on interaction between tado and Quatt
 - assigned boiler to other hardware channel to test stability

@@ -88,13 +88,13 @@ homekit_characteristic_t revision     = HOMEKIT_CHARACTERISTIC_(FIRMWARE_REVISIO
 
 void tgt_temp1_set(homekit_value_t value);
 void tgt_temp2_set(homekit_value_t value);
-homekit_characteristic_t tgt_heat1 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  3 );
+homekit_characteristic_t tgt_heat1 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  3 ); //AUTO
 homekit_characteristic_t cur_heat1 = HOMEKIT_CHARACTERISTIC_(CURRENT_HEATING_COOLING_STATE, 0 );
 homekit_characteristic_t tgt_temp1 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT1, .setter=tgt_temp1_set );
 homekit_characteristic_t cur_temp1 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         1.0 );
 homekit_characteristic_t dis_temp1 = HOMEKIT_CHARACTERISTIC_(TEMPERATURE_DISPLAY_UNITS,     0 );
 
-homekit_characteristic_t tgt_heat2 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  2 ); //COOL -> on/off mode
+homekit_characteristic_t tgt_heat2 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  1 ); //HEAT -> on/off mode
 homekit_characteristic_t cur_heat2 = HOMEKIT_CHARACTERISTIC_(CURRENT_HEATING_COOLING_STATE, 0 );
 homekit_characteristic_t tgt_temp2 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT2, .setter=tgt_temp2_set );
 homekit_characteristic_t cur_temp2 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         2.0 );
@@ -537,6 +537,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
             if ( !isnan(temp[Sx]) && temp[Sx]!=85 )         Sx##temp[0]=temp[Sx];    \
             Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5])/6.0; \
         } while(0)
+#define FLOAT2OT(f) (((uint32_t)(f*256*256.0))>>8)
 static TaskHandle_t tempTask = NULL;
 int timeIndex=0,switch_state=0,pump_off_time=0,retrigger=0;
 int push=-2;
@@ -585,12 +586,12 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x10014b00; //75 deg //1  CH setpoint in deg C
             } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
-                   message=0x10010000|(uint32_t)(heat_sp*256);
-            } else message=0x10010000|(uint32_t)(tgt_temp1.value.float_value*2-1)*256; //range from 19 - 75 deg
+                   message=0x10010000|FLOAT2OT(heat_sp);
+            } else message=0x10010000|FLOAT2OT(tgt_temp1.value.float_value*2-1); //range from 19 - 75 deg
             break;
         case 2:
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
-                if (tgt_temp2.value.float_value>17) message=0x100e0000|(uint32_t)(4*tgt_temp2.value.float_value-52)*256; //18-100%
+                if (tgt_temp2.value.float_value>17) message=0x100e0000|FLOAT2OT(4*tgt_temp2.value.float_value-52); //18-100%
                 else message=0x100e1100; //17%
             } else   message=0x100e6400; //100% //14 max modulation level
             break;
@@ -651,9 +652,9 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
         case 3: message=0x00000200|(heat_on?0x100:0x000); break; //0 enable CH and DHW
                 //    CMD:00000200    RSP:40000200     0 enable CH and DHW   (CH=off and DHW=on)
-        case 4: message=0x10100000|(uint32_t)tgt_temp1.value.float_value*256; break; //TODO: replace with gradual tracking
+        case 4: message=0x10100000|FLOAT2OT(tgt_temp1.value.float_value); break; //TODO: replace with gradual tracking
                 //    CMD:10101300    RSP:50101300    16 Room Setpoint = 19
-        case 5: message=0x10180000|(uint32_t)S1avg*256; break; //24 Room temperature
+        case 5: message=0x10180000|FLOAT2OT(S1avg); break; //24 Room temperature
                 //    CMD:101815a8    RSP:501815a8    24 Room temperature = 21.65625
         case 6: message=0x001b4600; break; //27 outside temp
                 //    CMD:001b4600    RSP:401b1152    27 outside temp 70 => 17.32
