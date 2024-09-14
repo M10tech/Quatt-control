@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.2.1 heatpump OT commands and test 2nd channel
+- based on interaction between tado and Quatt
+- assigned boiler to other hardware channel to test stability
+- initialize temperature reading buffers more consistently
+
 ### 0.2.0 conversion of dual-heater-opentherm complete
 - ported this from ESP8266 code to my ESP32 code
 - ready for new adventures

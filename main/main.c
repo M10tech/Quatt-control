@@ -24,8 +24,8 @@
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
 #define OTNUM         2 //number of OpenTherm channels, max 3 for ESP32P4
-#define HEATPUMP      1
-#define BOILER        0
+#define HEATPUMP      0
+#define BOILER        1
 #define OT0_SEND_PIN  GPIO_NUM_32
 #define OT1_SEND_PIN  GPIO_NUM_33
 #define OT2_SEND_PIN  GPIO_NUM_NC
@@ -94,7 +94,7 @@ homekit_characteristic_t tgt_temp1 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,
 homekit_characteristic_t cur_temp1 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         1.0 );
 homekit_characteristic_t dis_temp1 = HOMEKIT_CHARACTERISTIC_(TEMPERATURE_DISPLAY_UNITS,     0 );
 
-homekit_characteristic_t tgt_heat2 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  3 );
+homekit_characteristic_t tgt_heat2 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  2 ); //COOL -> on/off mode
 homekit_characteristic_t cur_heat2 = HOMEKIT_CHARACTERISTIC_(CURRENT_HEATING_COOLING_STATE, 0 );
 homekit_characteristic_t tgt_temp2 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT2, .setter=tgt_temp2_set );
 homekit_characteristic_t cur_temp2 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         2.0 );
@@ -169,6 +169,10 @@ void identify(homekit_value_t _value) {
 #define BW 4 //boiler water temp
 #define RW 5 //return water temp
 #define DW 8 //domestic home water temp
+#define PB 2 //heatPump boiler temp
+#define PR 3 //heatPump return temp
+#define PO 7 //heatPump outside temp
+#define PM 9 //heatPump max setpoint temp
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
 float S1temp[6],S2temp[6],S3temp[6],S1avg,S2avg,S3avg;
 float S3total=0;
@@ -267,9 +271,9 @@ enum    modes { STABLE, HEAT, EVAL };
 int     mode=EVAL,peak_time=15; //after update, evaluate only 15 minutes
 float   peak_temp=0,prev_setp=DEFAULT1,setpoint2=DEFAULT2,hystsetpoint2=DEFAULT2,heat_sp=35;
 float   stable_tgt_temp1=DEFAULT1, past_tgt_temp1[PAST_TGT_N];
-float   curr_mod=0,heat_mod=0,pressure=0;
+float   curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 time_t  heat_till=0;
-int     time_set=0,time_on=0,stateflg=0,errorflg=0;
+int     time_set=0,time_on=0,stateflg=0,pumpstateflg=0,errorflg=0;
 int     heat_on=0, boost=0;
 int heater(uint32_t seconds) {
     if (!time_set) return 0; //need reliable time
@@ -524,6 +528,10 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
 }
 
 
+#define NO_RSP(CHANNEL) do {UDPLUS("CH%d_NO_RSP!!! ",CHANNEL); \
+        resp_idx[CHANNEL]=0, rx_state[CHANNEL]=IDLE, response[CHANNEL]=0; \
+        ot_recv_enable[CHANNEL]=false; \
+        } while(0) //TODO: is resetting these values critical for proper operation?
 #define CalcAvg(Sx) do {            Sx##temp[5]=Sx##temp[4];Sx##temp[4]=Sx##temp[3]; \
             Sx##temp[3]=Sx##temp[2];Sx##temp[2]=Sx##temp[1];Sx##temp[1]=Sx##temp[0]; \
             if ( !isnan(temp[Sx]) && temp[Sx]!=85 )         Sx##temp[0]=temp[Sx];    \
@@ -608,8 +616,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     send_OT_frame(BOILER, message); //send message to BOILER OT receiver
     //since we want to run two OT channels every second, we only wait for response for 400ms
     if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
-        UDPLUS("CH%dRSP:%08lx\n",BOILER,message);
-        switch (timeIndex) { //check answers
+        UDPLUS("CH%dRSP:%08lx ",BOILER,message);
+        switch (timeIndex) { //check answers from BOILER
             case 0: temp[BW]=(float)(message&0x0000ffff)/256; break;
             case 3:
                 heat_mod=0.0;
@@ -630,11 +638,57 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                 break;
             default: break;
         }
-    } else { //TODO: make this a function
-        UDPLUS("!!! CH%d_NO_RSP: resp_idx=%d rx_state=%d response=%08lx\n",BOILER,resp_idx[BOILER], rx_state[BOILER], response[BOILER]);
-        resp_idx[BOILER]=0, rx_state[BOILER]=IDLE, response[BOILER]=0; //TODO: is this critical for proper operation?
-        ot_recv_enable[BOILER]=false;
+    } else {
+        NO_RSP(BOILER);
+    } //END of BOILER CONTROL
+    
+    switch (timeIndex) { //send commands HEATPUMP
+        case 0: message=0x00194600; break; //25 read boiler water temperature
+                //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
+        case 1: message=0x10014100; break; //55 deg //1  CH setpoint in deg C //TODO: make it increase gradually
+                //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
+        case 2: message=0x100e6400; break; //100% //14 max modulation level
+                //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
+        case 3: message=0x00000200|(heat_on?0x100:0x000); break; //0 enable CH and DHW
+                //    CMD:00000200    RSP:40000200     0 enable CH and DHW   (CH=off and DHW=on)
+        case 4: message=0x10100000|(uint32_t)tgt_temp1.value.float_value*256; break; //TODO: replace with gradual tracking
+                //    CMD:10101300    RSP:50101300    16 Room Setpoint = 19
+        case 5: message=0x10180000|(uint32_t)S1avg*256; break; //24 Room temperature
+                //    CMD:101815a8    RSP:501815a8    24 Room temperature = 21.65625
+        case 6: message=0x001b4600; break; //27 outside temp
+                //    CMD:001b4600    RSP:401b1152    27 outside temp 70 => 17.32
+        case 7: message=0x00394600; break; //57 max CH water setpoint (RW)
+                //    CMD:00394600    RSP:40394600    57 max CH water setpoint (RW) = 70
+        case 8: message=0x001c4600; break; //28 return water temp
+                //    CMD:001c4600    RSP:401c126d    28 return water temp 70 => 18.425
+        case 9: message=0x00110000; break; //17 rel mod level
+                //    CMD:00110000    RSP:40110000    17 rel mod level
+        default: break;
     }
+    send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
+    //since we want to run two OT channels every second, we only wait for response for 400ms
+    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
+        UDPLUS("CH%dRSP:%08lx ",HEATPUMP,message);
+        switch (timeIndex) { //check answers from HEATPUMP
+            case 0: temp[PB]=(float)(message&0x0000ffff)/256; break;
+                //   CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
+            case 3: pumpstateflg=(message&0x0000007f); break; //0x0a is CH on
+                //   CMD:00000200    RSP:40000200     0 enable CH and DHW   (CH=off and DHW=on)
+            case 6: temp[PO]=(float)(message&0x0000ffff)/256; break;
+                //   CMD:001b4600    RSP:401b1152    27 outside temp 70 => 17.32
+            case 7: temp[PM]=(float)(message&0x0000ffff)/256; break;
+                //   CMD:00394600    RSP:40394600    57 max CH water setpoint (RW) = 70
+            case 8: temp[PR]=(float)(message&0x0000ffff)/256; break;
+                //   CMD:001c4600    RSP:401c126d    28 return water temp 70 => 18.425
+            case 9: pump_mod=(float)(message&0x0000ffff)/256; break;
+                //   CMD:00110000    RSP:40110000    17 rel mod level
+            default: break;
+        }
+    } else {
+        NO_RSP(HEATPUMP);
+    } //END of HEATPUMP CONTROL
+    
+    UDPLUS("\n"); //close detailed report line
     
     if (!timeIndex) {
         CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
@@ -861,7 +915,7 @@ void main_task(void *arg) {
     mqtt_client_init(&mqttconf);
     switch_init();
     OT_init();
-    S1temp[0]=22;S2temp[0]=22;
+    S1temp[0]=DEFAULT1+0.1;S2temp[0]=DEFAULT2+0.1; //prevents starting heat if no sensor readings would come in
     xTaskCreatePinnedToCore(temp_task,"Temp", 4096, NULL, 1, &tempTask,1); //TODO: check if really needed to survive stuck sensor
     xTaskCreate(init_task,"Time", 2048, NULL, 6, NULL);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
