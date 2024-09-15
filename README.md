@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.2.5 adjust timeout and report more
+- there is like 1% CH1_NO_RSP to be fixed
+- allow less time for boiler and more for Quatt
+- report 4 items for heatpump
+
 ### 0.2.4 swap channels again
 
 ### 0.2.3 brackets my friend

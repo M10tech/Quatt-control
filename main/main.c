@@ -615,8 +615,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(BOILER, message); //send message to BOILER OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 400ms
-    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 300ms
+    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)300/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",BOILER,message);
         switch (timeIndex) { //check answers from BOILER
             case 0: temp[BW]=(float)(message&0x0000ffff)/256; break;
@@ -667,8 +667,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 400ms
-    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 500ms
+    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)500/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",HEATPUMP,message);
         switch (timeIndex) { //check answers from HEATPUMP
             case 0: temp[PB]=(float)(message&0x0000ffff)/256; break;
@@ -724,8 +724,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     }
 
     if (timeIndex==3) {
-        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f ERR=%02x RW=%4.1f BW=%4.1f POT=%3d ON=%d MOD=%02.0f ST=%02x\n", \
-           temp[S1],temp[S2],temp[S3],pressure,temp[DW],errorflg,temp[RW],temp[BW],pump_off_time,heat_on,curr_mod,stateflg);
+        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PMOD=%02.0f PST=%02x\n", \
+           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pump_mod,pumpstateflg);
     }
 
     timeIndex++; if (timeIndex==BEAT) timeIndex=0;
