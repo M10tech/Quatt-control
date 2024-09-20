@@ -427,7 +427,9 @@ void init_task(void *argv) {
     PUBLISH(tgt_temp1);
     PUBLISH(tgt_temp2);
     for (int i=0; i<PAST_TGT_N; i++) past_tgt_temp1[i]=tgt_temp1.value.float_value;
-    S1temp[0]=22;S2temp[0]=22;
+    //prevents starting heat if no sensor readings would come in
+    S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=tgt_temp1.value.float_value+0.1;
+    S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=tgt_temp2.value.float_value+0.1;
     
     setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1); tzset();
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -615,8 +617,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(BOILER, message); //send message to BOILER OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 300ms
-    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)300/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 200ms
+    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)200/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",BOILER,message);
         switch (timeIndex) { //check answers from BOILER
             case 0: temp[BW]=(float)(message&0x0000ffff)/256; break;
@@ -646,7 +648,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10014100; break; //55 deg //1  CH setpoint in deg C //TODO: make it increase gradually
+        case 1: message=0x10014100; break; //65 deg //1  CH setpoint in deg C //TODO: make it increase gradually
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
@@ -667,8 +669,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 500ms
-    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)500/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 600ms
+    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)600/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",HEATPUMP,message);
         switch (timeIndex) { //check answers from HEATPUMP
             case 0: temp[PB]=(float)(message&0x0000ffff)/256; break;
@@ -916,7 +918,6 @@ void main_task(void *arg) {
     mqtt_client_init(&mqttconf);
     switch_init();
     OT_init();
-    S1temp[0]=DEFAULT1+0.1;S2temp[0]=DEFAULT2+0.1; //prevents starting heat if no sensor readings would come in
     xTaskCreatePinnedToCore(temp_task,"Temp", 4096, NULL, 1, &tempTask,1); //TODO: check if really needed to survive stuck sensor
     xTaskCreate(init_task,"Time", 2048, NULL, 6, NULL);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
