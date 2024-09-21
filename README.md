@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.2.7 restore timeout
+- error rate for CH1_NO_RSP was not improved @0.7%
+- crashes went from zero in 200000 to 8 in 80000 seconds
+
 ### 0.2.6 adjust timeout more
 - still CH1_NO_RSP to be fixed
 - average temperature initialisation

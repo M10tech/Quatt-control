@@ -602,7 +602,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                    message=0x00000200|(switch_on?0x100:0x000); //0  enable CH and DHW
             } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
                    message=0x00000200|(  heat_on?0x100:0x000);
-            } else message=0x00000200|(tgt_heat1.value.int_value<<8);
+            } else message=0x00000200|(tgt_heat1.value.int_value<<8); //0=off, 1=heat, 2=off, 3=heat
             break; 
         case 4:
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_COOL) { //test BLOR
@@ -617,8 +617,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(BOILER, message); //send message to BOILER OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 200ms
-    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)200/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 400ms
+    if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",BOILER,message);
         switch (timeIndex) { //check answers from BOILER
             case 0: temp[BW]=(float)(message&0x0000ffff)/256; break;
@@ -669,8 +669,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         default: break;
     }
     send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
-    //since we want to run two OT channels every second, we only wait for response for 600ms
-    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)600/portTICK_PERIOD_MS) == pdTRUE) {
+    //since we want to run two OT channels every second, we only wait for response for 400ms
+    if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",HEATPUMP,message);
         switch (timeIndex) { //check answers from HEATPUMP
             case 0: temp[PB]=(float)(message&0x0000ffff)/256; break;
