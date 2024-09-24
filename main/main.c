@@ -541,7 +541,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
         } while(0)
 #define FLOAT2OT(f) (((uint32_t)((f)*256*256.0))>>8)
 static TaskHandle_t tempTask = NULL;
-int timeIndex=0,switch_state=0,pump_off_time=0,retrigger=0;
+int timeIndex=0,switch_state=0,pump_off_time=0,retrigger=0,heat_result=0;
 int push=-2;
 TimerHandle_t xTimer;
 void vTimerCallback( TimerHandle_t xTimer ) {
@@ -558,7 +558,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     if (timeIndex==3) { // allow 3 seconds for two automation rules to succeed and repeat every 10 seconds
         if (pump_off_time) pump_off_time-=10;
         if (tgt_heat1.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_COOL) { //Pump Off rule confirmed
-            cur_heat2.value.int_value= 1;   //confirm we are heating upstairs
+            if (heat_result) cur_heat2.value.int_value= 1;   //confirm we are heating upstairs
+            else cur_heat2.value.int_value= 0;   //confirm we are not heating
             homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
             tgt_heat1.value.int_value= HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO;   //set heater 1 mode back to auto and be ready for another trigger
             homekit_characteristic_notify(&tgt_heat1,HOMEKIT_UINT8(tgt_heat1.value.int_value)); //TODO: racecondition?
@@ -719,9 +720,10 @@ void vTimerCallback( TimerHandle_t xTimer ) {
 
     if (seconds%60==50) { //allow 6 temperature measurments to make sure all info is loaded
         heat_on=0;
-        cur_heat2.value.int_value=heater(seconds); //sets heat_sp and returns heater result, 0, 1 or 2
-        if (cur_heat2.value.int_value==2 && pump_off_time>90) cur_heat2.value.int_value=1; //do not retrigger rules yet
-        if (cur_heat2.value.int_value==1) heat_on=1;
+        heat_result=heater(seconds); //sets heat_sp and returns heater result, 0, 1 or 2
+        if (heat_result) heat_on=1;
+        cur_heat2.value.int_value=heat_result;
+        if (heat_result!=1 && pump_off_time<100) cur_heat2.value.int_value=2; //retrigger rules so pump off
         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
     }
 
