@@ -564,7 +564,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             tgt_heat1.value.int_value= HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO;   //set heater 1 mode back to auto and be ready for another trigger
             homekit_characteristic_notify(&tgt_heat1,HOMEKIT_UINT8(tgt_heat1.value.int_value)); //TODO: racecondition?
             pump_off_time=180; //seconds
-            heat_on=1;
+            if (heat_result) heat_on=1; else heat_on=0;
         }
         if (cur_heat2.value.int_value==2) {//send reminder notify
             cur_heat2.value.int_value= 0; //to assure it is considered as a new value we first set it to off

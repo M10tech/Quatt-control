@@ -2,6 +2,9 @@ the README
 
 ## version history
 
+### 0.3.1 fixed bad heat_on value
+- also activated when heater=off and PumpOffTimer confirmed
+
 ### 0.3.0 change PumpOffTime rules
 - POT when heat_result==off or upstairs
 - so pump only works when heat_result==downstairs
