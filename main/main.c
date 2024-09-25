@@ -570,7 +570,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             cur_heat2.value.int_value= 0; //to assure it is considered as a new value we first set it to off
             homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value)); //and notify
             retrigger=1;
-            if (pump_off_time>10) heat_on=1; //still time left
+            if (pump_off_time>10) {if (heat_result) heat_on=1; else heat_on=0;} //still time left
         }
     }
     if (retrigger && timeIndex==8) { retrigger=0; //retrigger needed 5 seconds offset
@@ -587,17 +587,12 @@ void vTimerCallback( TimerHandle_t xTimer ) {
             break;
         case 1: //execute heater decisions
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
-                   message=0x10014b00; //75 deg //1  CH setpoint in deg C
+                   message=0x10014100; //65 deg //1  CH setpoint in deg C
             } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
                    message=0x10010000|FLOAT2OT(heat_sp);
             } else message=0x10010000|FLOAT2OT(tgt_temp1.value.float_value*2-1); //range from 19 - 75 deg
             break;
-        case 2:
-            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
-                if (tgt_temp2.value.float_value>17) message=0x100e0000|FLOAT2OT(4*tgt_temp2.value.float_value-52); //18-100%
-                else message=0x100e1100; //17%
-            } else   message=0x100e6400; //100% //14 max modulation level
-            break;
+        case 2: message=0x100e6400; break; //100% //14 max modulation level
         case 3:
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x00000200|(switch_on?0x100:0x000); //0  enable CH and DHW
@@ -605,11 +600,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                    message=0x00000200|(  heat_on?0x100:0x000);
             } else message=0x00000200|(tgt_heat1.value.int_value<<8); //0=off, 1=heat, 2=off, 3=heat
             break; 
-        case 4:
-            if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_COOL) { //test BLOR
-                   message=0x10040100; //4.1  BoilerLockOutReset
-            } else message=0x00380000; //56 DHW setpoint write
-            break;
+        case 4: message=0x00380000; break; //56 DHW setpoint read
         case 5: message=0x00050000; break; //5  app specific fault flags
         case 6: message=0x00120000; break; //18 CH water pressure
         case 7: message=0x001a0000; break; //26 DHW temp
@@ -649,7 +640,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10014100; break; //65 deg //1  CH setpoint in deg C //TODO: make it increase gradually
+        case 1: message=0x10010000|FLOAT2OT(heat_sp); break; //1  CH setpoint in deg C
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100

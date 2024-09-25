@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.3.2 one more glitch in heat_on value
+- when trigger missed, retrigger part needed update also
+- normalised some OpenTherm commands
+
 ### 0.3.1 fixed bad heat_on value
 - also activated when heater=off and PumpOffTimer confirmed
 
