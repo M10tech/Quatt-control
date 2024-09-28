@@ -290,12 +290,12 @@ int heater(uint32_t seconds) {
     if (delta2<hys2) {heater2=1; hys2=0.1;} else hys2=0.0;
     
     //integrated logic for both heaters
-    room_sp=(delta1>delta2)?tgt_temp1.value.float_value:tgt_temp2.value.float_value+S1avg-S2avg;
+    room_sp=(delta1<delta2)?tgt_temp1.value.float_value:tgt_temp2.value.float_value+S1avg-S2avg; //note delta is negative so <
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
-    UDPLUS("Heater@%-4ld  %s => room_sp:%5.2f h1:%d + h2:%d = on:%d S1=%7.4f S2=%7.4f S3=%7.4f ST=%02x\n", \
-            (seconds+10)/60,strtm,room_sp,heater1,heater2,result,S1avg,S2avg,S3avg,stateflg);
+    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d + h2:%d = on:%d ST=%02x PST=%02x\n", \
+            S1avg,S2avg,S3avg,(seconds+10)/60,strtm,room_sp,heater1,heater2,result,stateflg,pumpstateflg);
     PUBLISH(S1avg);
     PUBLISH(S2avg);
     PUBLISH(heat_mod);
@@ -630,8 +630,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     }
 
     if (timeIndex==3) {
-        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PST=%02x\n", \
-           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pumpstateflg);
+        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f SW=%d MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PST=%02x\n", \
+           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],switch_on,curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pumpstateflg);
     }
 
     timeIndex++; if (timeIndex==BEAT) timeIndex=0;

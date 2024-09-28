@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.3.4 non double negative logic doesn't confuse you
+- delta is negative when heating is required
+- clean up reporting line
+
 ### 0.3.3 basic heater algorithm
 - algorithm uses setpoint based on up and down roomtemp
 - changed default temp to 20 degrees
