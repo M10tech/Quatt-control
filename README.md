@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.3.3 basic heater algorithm
+- algorithm uses setpoint based on up and down roomtemp
+- changed default temp to 20 degrees
+
 ### 0.3.2 one more glitch in heat_on value
 - when trigger missed, retrigger part needed update also
 - normalised some OpenTherm commands

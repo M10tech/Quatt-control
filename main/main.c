@@ -36,8 +36,8 @@
 #define ONE_WIRE_GND  GPIO_NUM_26
 #define SWITCH_PIN    GPIO_NUM_27
 
-#define DEFAULT1 19.0
-#define DEFAULT2 19.0
+#define DEFAULT1 20.0
+#define DEFAULT2 20.0
 
 int idx=68; //the domoticz base index
 #define PUBLISH(name) do {int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"%.2f\"}", idx+name##_ix, name##_fv); \
@@ -53,8 +53,8 @@ int idx=68; //the domoticz base index
 #define     S2avg_ix 4
 #define  heat_mod_fv heat_mod
 #define  heat_mod_ix 5
-#define   heat_sp_fv heat_sp
-#define   heat_sp_ix 6
+#define   room_sp_fv room_sp
+#define   room_sp_ix 6
 #define   burnerW_fv temp[BW]
 #define   burnerW_ix 7
 #define   returnW_fv temp[RW]
@@ -265,125 +265,41 @@ void temp_task(void *argv) {
 
 // #define RTC_ADDR    0x600013B0
 // #define RTC_MAGIC   0xaabecede
-#define PAST_TGT_N  10
-#define BOOSTLEVEL  25.0
-enum    modes { STABLE, HEAT, EVAL };
-int     mode=EVAL,peak_time=15; //after update, evaluate only 15 minutes
-float   peak_temp=0,prev_setp=DEFAULT1,setpoint2=DEFAULT2,hystsetpoint2=DEFAULT2,heat_sp=35;
-float   stable_tgt_temp1=DEFAULT1, past_tgt_temp1[PAST_TGT_N];
-float   curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
-time_t  heat_till=0;
-int     time_set=0,time_on=0,stateflg=0,pumpstateflg=0,errorflg=0;
-int     heat_on=0, boost=0;
+float room_sp=DEFAULT1;
+float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
+int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
+int   heat_on=0;
+float hys1=0.0,hys2=0.0;
 int heater(uint32_t seconds) {
-    if (!time_set) return 0; //need reliable time
-    char str[26], strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
+    char strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
     struct timeval tv;
     gettimeofday(&tv, NULL);
     time_t now=tv.tv_sec;
     struct tm *tm = localtime(&now);
-
-    if ( (tm->tm_hour==22 || tm->tm_hour==7) && S3samples>360 ) {
-        float S3long=S3total/S3samples;
-        PUBLISH(S3long);
-        S3samples=0;S3total=0;
-        PUBLISH(tgt_temp1); //to refresh the report to MQTT because this setpoint almost never changes
-    }
-
-    int eval_time=0,heater1=0,heater2=0;
     sprintf(strtm,"DST%dwd%dyd%-3d %2d|%02d:%02d:%02d.%06d",tm->tm_isdst,tm->tm_wday,tm->tm_yday,tm->tm_mday,
             tm->tm_hour,tm->tm_min,tm->tm_sec,(int)tv.tv_usec);
-    //heater2 logic
-    if (tgt_temp2.value.float_value>setpoint2) setpoint2+=0.0625; //slow adjust up
-    if (tgt_temp2.value.float_value<setpoint2) setpoint2-=0.0625; //slow adjust down
-    if (setpoint2-S2avg < -0.125) setpoint2=S2avg-0.125; //prevent it takes very long to actually start heating after turn up
-    if (setpoint2-S2avg>   0) hystsetpoint2=setpoint2+0.4; //below setpoint, try to overshoot
-    if (setpoint2-S2avg<-0.1) hystsetpoint2=setpoint2;     //0.1 above the setup, wait till we drop below again
-    if (hystsetpoint2-S2avg>0) {
-        heat_sp=35+(hystsetpoint2-S2avg)*16; if (heat_sp>75) heat_sp=75;
-        heater2=1;
-    } else heat_sp=35;//request lowest possible output for floor heating while not heating radiators explicitly
-
-    //heater1 logic
-    float setpoint1=tgt_temp1.value.float_value;
-    int   i,j,stable=0;
-    if (setpoint1<BOOSTLEVEL) { //shift history left
-        for (i=0;i<PAST_TGT_N-1;i++) past_tgt_temp1[i]=past_tgt_temp1[i+1];
-        past_tgt_temp1[i]=setpoint1;
-    }
-    for (i=0; i<PAST_TGT_N; i++)     if (past_tgt_temp1[i]==stable_tgt_temp1) stable++;
-    for (j=0; j<PAST_TGT_N; j++) {
-        int newer=0;
-        for (i=0; i<PAST_TGT_N; i++) if (past_tgt_temp1[i]==past_tgt_temp1[j]) newer++;
-        if (newer>stable) {
-            stable_tgt_temp1=past_tgt_temp1[j]; stable=newer;
-        }
-    }
     
-    if (setpoint1<BOOSTLEVEL) boost=0; else if (heat_mod) boost++;
-    if (boost>30) {
-        setpoint1=tgt_temp1.value.float_value=stable_tgt_temp1;
-        homekit_characteristic_notify(&tgt_temp1,HOMEKIT_FLOAT(tgt_temp1.value.float_value));
-        PUBLISH(tgt_temp1); //to refresh the report to MQTT
-    }
-    if (setpoint1!=prev_setp) {
-        if (setpoint1>prev_setp) mode=STABLE; else mode=EVAL;
-        prev_setp=setpoint1;
-    }
-    if (mode==EVAL) {
-        eval_time=((setpoint1-peak_temp)>0.06) ? 4/(setpoint1-peak_temp) : 64 ; //max eval time will be 64 minutes
-        if (S1avg<(peak_temp-0.07) || peak_time++>=eval_time || S1avg>=setpoint1) {
-            mode=STABLE;
-            //adjust ffactor
-            peak_temp=0,peak_time=0;
-        } else if (peak_temp<S1avg) {
-            peak_temp=S1avg;
-            peak_time=0;
-        }
-        if (S1avg<peak_temp) peak_time++; //double fast countdown if S1Avg temp < peak temp
-    }
-    if (mode==STABLE) {
-        if (tm->tm_hour<7 || tm->tm_hour>=22) { //night time preparing for morning warmup
-            time_on=(ffactor*(setpoint1-S1avg));
-            heat_till=now+(time_on*60)-2;               // -2 makes switch off moment more logical
-            struct tm *seven02 = localtime(&now);       // some bizar leaking of values between tm and seven02
-            if (tm->tm_hour>=22) seven02->tm_mday++;                  // 7:02 AM is tomorrow
-            seven02->tm_hour=7; seven02->tm_min=2; seven02->tm_sec=0; //  :02 makes transition for heater 2 better
-            if (heat_till>mktime(seven02)) mode=HEAT;
-        } else { //daytime control
-            time_on=(ffactor*(setpoint1-S1avg)*0.3);
-            heat_till=now+(time_on*60)-2;
-            if (time_on>5) mode=HEAT; //5 minutes at least, else too quick and allows fixes of 1/16th degree C
-        }
-    }
-    if (mode==HEAT) {
-        if (now>heat_till) {
-            time_on=0;
-            mode=EVAL;
-            peak_temp=S1avg;
-            peak_time=0;
-        } else if ( setpoint1-S1avg>0 ){
-            if (heat_mod) time_on--; else heat_till+=60; //only when burner on, count progress else shift end time
-            heater1=1;
-        } else {
-            mode=STABLE;
-        }
-    }
+    int heater1=0,heater2=0;
+    float delta1=0.0,delta2=0.0;
+    //heater1 logic
+    delta1=S1avg-tgt_temp1.value.float_value;
+    if (delta1<hys1) {heater1=1; hys1=0.1;} else hys1=0.0;
+    
+    //heater2 logic
+    delta2=S2avg-tgt_temp2.value.float_value;
+    if (delta2<hys2) {heater2=1; hys2=0.1;} else hys2=0.0;
     
     //integrated logic for both heaters
+    room_sp=(delta1>delta2)?tgt_temp1.value.float_value:tgt_temp2.value.float_value+S1avg-S2avg;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
-    ctime_r(&heat_till,str);str[16]=0; str[5]=str[10]=' ';str[6]='t';str[7]='i';str[8]=str[9]='l'; // " till hh:mm"
-    if (time_on<0) time_on=0;
-    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f f=%6.1f time-on=%3d peak_temp=%7.4f peak_time=%2d<%2d ST=%02x mode=%d%s\n", \
-            S1avg,S2avg,S3avg,ffactor,time_on,peak_temp,peak_time,eval_time,stateflg,mode,(mode==1)?(str+5):"");
-    UDPLUS("Heater@%-4ld  stable:%4.1f %s   %s => heat_sp:%4.1f h1:%d + h2:%d = on:%d\n", \
-            (seconds+10)/60,stable_tgt_temp1,boost?"boost":"     ",strtm,heat_sp,heater1,heater2,result);
+    UDPLUS("Heater@%-4ld  %s => room_sp:%5.2f h1:%d + h2:%d = on:%d S1=%7.4f S2=%7.4f S3=%7.4f ST=%02x\n", \
+            (seconds+10)/60,strtm,room_sp,heater1,heater2,result,S1avg,S2avg,S3avg,stateflg);
     PUBLISH(S1avg);
     PUBLISH(S2avg);
     PUBLISH(heat_mod);
-    PUBLISH(heat_sp);
+    PUBLISH(room_sp);
     PUBLISH(burnerW);
     PUBLISH(returnW);
     PUBLISH(pressure);
@@ -426,7 +342,6 @@ void init_task(void *argv) {
 //             prev_setp,ffactor,peak_time,peak_temp,mode,ctime(&heat_till));
     PUBLISH(tgt_temp1);
     PUBLISH(tgt_temp2);
-    for (int i=0; i<PAST_TGT_N; i++) past_tgt_temp1[i]=tgt_temp1.value.float_value;
     //prevents starting heat if no sensor readings would come in
     S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=tgt_temp1.value.float_value+0.1;
     S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=tgt_temp2.value.float_value+0.1;
@@ -588,16 +503,12 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         case 1: //execute heater decisions
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x10014100; //65 deg //1  CH setpoint in deg C
-            } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
-                   message=0x10010000|FLOAT2OT(heat_sp);
             } else message=0x10010000|FLOAT2OT(tgt_temp1.value.float_value*2-1); //range from 19 - 75 deg
             break;
         case 2: message=0x100e6400; break; //100% //14 max modulation level
         case 3:
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    message=0x00000200|(switch_on?0x100:0x000); //0  enable CH and DHW
-            } else if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_AUTO) { //run heater algoritm for floor heating
-                   message=0x00000200|(  heat_on?0x100:0x000);
             } else message=0x00000200|(tgt_heat1.value.int_value<<8); //0=off, 1=heat, 2=off, 3=heat
             break; 
         case 4: message=0x00380000; break; //56 DHW setpoint read
@@ -640,13 +551,13 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10010000|FLOAT2OT(heat_sp); break; //1  CH setpoint in deg C
+        case 1: message=0x10012300; break; //1  CH setpoint in deg C  35
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
         case 3: message=0x00000200|(heat_on?0x100:0x000); break; //0 enable CH and DHW
                 //    CMD:00000200    RSP:40000200     0 enable CH and DHW   (CH=off and DHW=on)
-        case 4: message=0x10100000|FLOAT2OT(tgt_temp1.value.float_value); break; //TODO: replace with gradual tracking
+        case 4: message=0x10100000|FLOAT2OT(room_sp); break; //TODO: introduce gradual tracking
                 //    CMD:10101300    RSP:50101300    16 Room Setpoint = 19
         case 5: message=0x10180000|FLOAT2OT(S1avg); break; //24 Room temperature
                 //    CMD:101815a8    RSP:501815a8    24 Room temperature = 21.65625
@@ -719,8 +630,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     }
 
     if (timeIndex==3) {
-        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PMOD=%02.0f PST=%02x\n", \
-           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pump_mod,pumpstateflg);
+        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PST=%02x\n", \
+           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pumpstateflg);
     }
 
     timeIndex++; if (timeIndex==BEAT) timeIndex=0;
