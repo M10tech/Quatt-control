@@ -65,6 +65,10 @@ int idx=68; //the domoticz base index
 #define     S3avg_ix 10
 #define    S3long_fv S3long
 #define    S3long_ix 11
+#define  PBurnerw_fv temp[PB]
+#define  PBurnerw_ix 61
+#define  PReturnw_fv temp[PR]
+#define  PReturnw_ix 62
 
 
 /* ============== BEGIN HOMEKIT CHARACTERISTIC DECLARATIONS =============================================================== */
@@ -276,8 +280,8 @@ int heater(uint32_t seconds) {
     gettimeofday(&tv, NULL);
     time_t now=tv.tv_sec;
     struct tm *tm = localtime(&now);
-    sprintf(strtm,"DST%dwd%dyd%-3d %2d|%02d:%02d:%02d.%06d",tm->tm_isdst,tm->tm_wday,tm->tm_yday,tm->tm_mday,
-            tm->tm_hour,tm->tm_min,tm->tm_sec,(int)tv.tv_usec);
+    sprintf(strtm,"DST%dwd%dyd%-3d %2d|%02d:%02d:%02d",tm->tm_isdst,tm->tm_wday,tm->tm_yday,tm->tm_mday,
+            tm->tm_hour,tm->tm_min,tm->tm_sec);
     
     int heater1=0,heater2=0;
     float delta1=0.0,delta2=0.0;
@@ -294,7 +298,7 @@ int heater(uint32_t seconds) {
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
-    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d + h2:%d = on:%d ST=%02x PST=%02x\n", \
+    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d+h2:%d=on:%d ST=%02x PST=%02x\n", \
             S1avg,S2avg,S3avg,(seconds+10)/60,strtm,room_sp,heater1,heater2,result,stateflg,pumpstateflg);
     PUBLISH(S1avg);
     PUBLISH(S2avg);
@@ -304,6 +308,8 @@ int heater(uint32_t seconds) {
     PUBLISH(returnW);
     PUBLISH(pressure);
     PUBLISH(S3avg);
+    PUBLISH(PBurnerw);
+    PUBLISH(PReturnw);
     
     //save state to RTC memory
 //     uint32_t *dp;         WRITE_PERI_REG(RTC_ADDR+ 4,mode     ); //int
@@ -630,8 +636,8 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     }
 
     if (timeIndex==3) {
-        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f SW=%d MOD=%02.0f ST=%02x ERR=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PST=%02x\n", \
-           temp[S1],temp[S2],temp[S3],pressure,temp[DW],temp[RW],temp[BW],switch_on,curr_mod,stateflg,errorflg,pump_off_time,heat_on,temp[PB],temp[PR],pumpstateflg);
+        UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f ERR=%02x PR=%4.2f DW=%4.1f RW=%4.1f BW=%4.1f SW=%d MOD=%02.0f ST=%02x POT=%3d ON=%d PB=%4.1f PR=%4.1f PST=%02x\n", \
+           temp[S1],temp[S2],temp[S3],errorflg,pressure,temp[DW],temp[RW],temp[BW],switch_on,curr_mod,stateflg,pump_off_time,heat_on,temp[PB],temp[PR],pumpstateflg);
     }
 
     timeIndex++; if (timeIndex==BEAT) timeIndex=0;

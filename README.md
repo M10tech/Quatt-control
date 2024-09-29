@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.3.5 publish heatpump temperatures to domoticz
+- suppress MQTT publish reports
+- report line cleanup
+
 ### 0.3.4 non double negative logic doesn't confuse you
 - delta is negative when heating is required
 - clean up reporting line
