@@ -2,6 +2,13 @@ the README
 
 ## version history
 
+### 0.4.0 fixed storage of pairing in esp32-homekit
+- storage_add_pairing was overwriting new data with stored data
+- since pairing_t has a string, we need to add closing zero
+- when remove_pairing, scan all slots for multiple copies due to issues above
+- use better logging of pairing records
+- when unpair, reset homekit storage and reset device
+
 ### 0.3.5 publish heatpump temperatures to domoticz
 - suppress MQTT publish reports
 - report line cleanup
