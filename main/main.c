@@ -226,7 +226,7 @@ void temp_task(void *argv) {
         if (sensor_count>=SENSORS) break;
         
         for (int i=0; i<sensor_count; i++) ds18b20_del_device(ds18b20s[i]);
-        SINKBUS(2000); //long reset one-wire bus
+        SINKBUS(7000); //long reset one-wire bus
         if (onewire_del_device_iter(iter)!=ESP_OK) UDPLUS("onewire_del_device_iter failed\n");
         if (fail++>50) {
             UDPLUS("restarting because can't find enough sensors\n");
@@ -238,27 +238,31 @@ void temp_task(void *argv) {
     } //break out when all SENSORS are found
 
     float temperature;
-    int indx=0;
+    bool been_reset;
     while (1) {
-        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this 3 x in 10 seconds
-        if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
-            if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
-                temp[ids[indx]] = temperature;
-                //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
-//                 int n=mqtt_client_publish("{\"idx\":%d,\"nvalue\":0,\"svalue\":\"%.3f\"}", 345, temperature);
-//                 UDPLUS("n=%d\n",n);
+        been_reset=false;
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY ); //the timer loop triggers this 1 x in 10 seconds
+        for (int indx=0;indx<sensor_count; indx++) {
+            if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
+                if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
+                    temp[ids[indx]] = temperature;
+                    //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+                } else {
+                    UDPLUS("ds18b20_get_temperature for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
+                    temp[ids[indx]] = NAN;
+                    if (been_reset) continue; //do not sink bus twice in a 10s slot
+                    SINKBUS(7000); //long reset one-wire bus
+                    been_reset=true;
+                    UDPLUS("after long reset bus\n"); //without depriving a stuck sensor from power for a few seconds, it will stay stuck
+                }
             } else {
-                UDPLUS("ds18b20_get_temperature for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
+                UDPLUS("ds18b20_trigger_temperature_conversion for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
                 temp[ids[indx]] = NAN;
-                SINKBUS(2000); //long reset one-wire bus
-                UDPLUS("after long reset bus\n"); //without depriving a stuck sensor from power for a few seconds, it will stay stuck
+                if (been_reset) continue; //do not sink bus twice in a 10s slot
+                SINKBUS(7000); //long reset one-wire bus
+                been_reset=true;
             }
-        } else {
-            UDPLUS("ds18b20_trigger_temperature_conversion for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
-            temp[ids[indx]] = NAN;
-            SINKBUS(2000); //long reset one-wire bus
         }
-        indx++; if (indx>=sensor_count) indx=0;
         if (!isnan(temp[S3]) && temp[S3]!=85) S3samples++,S3total+=temp[S3];
         TEMP2HK(1);
         TEMP2HK(2);
@@ -498,12 +502,10 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         cur_heat2.value.int_value= 2;
         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
     }
-    if (timeIndex%3==1) { //trigger at 1, 4 and 7s so more time to finish temp reading and each sensor is read once a BEAT
-        xTaskNotifyGive( tempTask ); //temperature measurement start
-        vTaskDelay(1); //TODO: is this needed: prevent interference between OneWire and OT-receiver
-    }
     switch (timeIndex) { //send commands BOILER
         case 0: //measure temperature
+            xTaskNotifyGive( tempTask ); //temperature measurement start
+            vTaskDelay(1); //TODO: is this needed: prevent interference between OneWire and OT-receiver
             message=0x00190000; //25 read boiler water temperature
             break;
         case 1: //execute heater decisions

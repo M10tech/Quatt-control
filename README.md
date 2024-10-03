@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.4.1 need harder reset of DS18B20 sensors
+- 2 seconds is not enough, make it 7s
+- needs different approach to collect temperatures
+
 ### 0.4.0 fixed storage of pairing in esp32-homekit
 - storage_add_pairing was overwriting new data with stored data
 - since pairing_t has a string, we need to add closing zero
