@@ -20,6 +20,7 @@
 #include "math.h" //for NAN
 #include "esp_ota_ops.h" //for esp_app_get_description
 #include "mqtt-client.h"
+#include "ping/ping_sock.h"
 
 // You must set version.txt file to match github version tag x.y.z for LCM4ESP32 to work
 
@@ -70,6 +71,7 @@ int idx=68; //the domoticz base index
 #define  PReturnw_fv temp[PR]
 #define  PReturnw_ix 62
 
+char    *pinger_target=NULL;
 
 /* ============== BEGIN HOMEKIT CHARACTERISTIC DECLARATIONS =============================================================== */
 // add this section to make your device OTA capable
@@ -229,9 +231,9 @@ void temp_task(void *argv) {
         SINKBUS(7000); //long reset one-wire bus
         if (onewire_del_device_iter(iter)!=ESP_OK) UDPLUS("onewire_del_device_iter failed\n");
         if (fail++>50) {
+            mqtt_client_publish("{\"idx\":%d,\"nvalue\":4,\"svalue\":\"Heater No Sensors\"}", idx);
             UDPLUS("restarting because can't find enough sensors\n");
-//             mqtt_client_publish("{\"idx\":%d,\"nvalue\":4,\"svalue\":\"Heater No Sensors\"}", idx);
-            vTaskDelay(3000/portTICK_PERIOD_MS);
+            vTaskDelay(3000/portTICK_PERIOD_MS); //allow MQTT and UDPlog to flush output
             esp_restart();
         }
         vTaskDelay(BEAT*1000/portTICK_PERIOD_MS);
@@ -298,7 +300,7 @@ int heater(uint32_t seconds) {
     if (delta2<hys2) {heater2=1; hys2=0.1;} else hys2=0.0;
     
     //integrated logic for both heaters
-    room_sp=(delta1<delta2)?tgt_temp1.value.float_value:tgt_temp2.value.float_value+S1avg-S2avg; //note delta is negative so <
+    room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+hys2+S1avg-S2avg; //note delta is negative so <
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
@@ -702,6 +704,44 @@ void switch_init() { //reads a NormallyOpen contact from Quatt CiC to switch on 
     gpio_config(&io_conf); //configure GPIO with the given settings
 }
 
+int ping_count=120,ping_delay=1; //seconds
+static void ping_success(esp_ping_handle_t hdl, void *args) {
+    ping_count+=20; ping_delay+=5;
+    if (ping_count>300) ping_count=300;
+    if (ping_delay>60)  ping_delay=60;
+    uint32_t elapsed_time;
+    ip_addr_t response_addr;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR,  &response_addr,  sizeof(response_addr));
+    UDPLUS("good ping from %s %lu ms -> count: %d s\n", inet_ntoa(response_addr.u_addr.ip4), elapsed_time, ping_count);
+}
+static void ping_timeout(esp_ping_handle_t hdl, void *args) {
+    ping_count--; ping_delay=1;
+    UDPLUS("failed ping -> count: %d s\n", ping_count);
+}
+void ping_task(void *argv) {
+    ip_addr_t target_addr;
+    ipaddr_aton(pinger_target,&target_addr);
+    esp_ping_handle_t ping;
+    esp_ping_config_t ping_config = ESP_PING_DEFAULT_CONFIG();
+    ping_config.target_addr = target_addr;
+    ping_config.timeout_ms = 900; //should time-out before our 1s delay
+    ping_config.count = 1; //one ping at a time means we can regulate the interval at will
+    esp_ping_callbacks_t cbs = {.on_ping_success=ping_success, .on_ping_timeout=ping_timeout, .on_ping_end=NULL, .cb_args=NULL}; //set callback functions
+    esp_ping_new_session(&ping_config, &cbs, &ping);
+    
+    UDPLUS("Pinging IP %s\n", ipaddr_ntoa(&target_addr));
+    while(ping_count){
+        vTaskDelay((ping_delay-1)*(1000/portTICK_PERIOD_MS)); //already waited 1 second...
+        esp_ping_start(ping);
+        vTaskDelay(1000/portTICK_PERIOD_MS); //waiting for answer or timeout to update ping_delay value
+    }
+    mqtt_client_publish("{\"idx\":%d,\"nvalue\":2,\"svalue\":\"Heater No Ping\"}", idx);
+    UDPLUS("restarting because can't ping home-hub\n");
+    vTaskDelay(3000/portTICK_PERIOD_MS); //allow MQTT and UDPlog to flush output
+    esp_restart();
+}
+
 mqtt_config_t mqttconf=MQTT_DEFAULT_CONFIG;
 char error[]="error";
 static void ota_string() {
@@ -726,7 +766,7 @@ static void ota_string() {
     if (mqttconf.pass==NULL) mqttconf.pass=error;
     if (dmtczbaseidx1==NULL) idx=1000; else idx=atoi(dmtczbaseidx1);
     //if (pinger_target==NULL) pinger_target=error;
-    //pinger_target="192.168.178.100";
+    pinger_target="192.168.178.100";
     //DO NOT free the otas since it carries the config pieces
 }
 
@@ -832,6 +872,7 @@ void main_task(void *arg) {
     OT_init();
     xTaskCreatePinnedToCore(temp_task,"Temp", 4096, NULL, 1, &tempTask,1); //TODO: check if really needed to survive stuck sensor
     xTaskCreate(init_task,"Time", 2048, NULL, 6, NULL);
+    xTaskCreate(ping_task,"PingT",2048, NULL, 1, NULL);
     xTimer=xTimerCreate( "Timer", 1000/portTICK_PERIOD_MS, pdTRUE, (void*)0, vTimerCallback);
     xTimerStart(xTimer, 0);
     //vTaskDelay(1000/portTICK_PERIOD_MS); //Allow inits to settle

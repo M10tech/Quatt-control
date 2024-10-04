@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.4.2 added ping-guard
+- will reset if no ping for 5 minutes
+- added hysteresis values to heater outcome logic
+
 ### 0.4.1 need harder reset of DS18B20 sensors
 - 2 seconds is not enough, make it 7s
 - needs different approach to collect temperatures
