@@ -94,19 +94,22 @@ homekit_characteristic_t revision     = HOMEKIT_CHARACTERISTIC_(FIRMWARE_REVISIO
 
 void tgt_temp1_set(homekit_value_t value);
 void tgt_temp2_set(homekit_value_t value);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverride-init"
 homekit_characteristic_t tgt_heat1 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  3 ); //AUTO
 homekit_characteristic_t cur_heat1 = HOMEKIT_CHARACTERISTIC_(CURRENT_HEATING_COOLING_STATE, 0 );
-homekit_characteristic_t tgt_temp1 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT1, .setter=tgt_temp1_set );
+homekit_characteristic_t tgt_temp1 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT1, .max_value=(float[]){25}, .setter=tgt_temp1_set );
 homekit_characteristic_t cur_temp1 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         1.0 );
 homekit_characteristic_t dis_temp1 = HOMEKIT_CHARACTERISTIC_(TEMPERATURE_DISPLAY_UNITS,     0 );
 
 homekit_characteristic_t tgt_heat2 = HOMEKIT_CHARACTERISTIC_(TARGET_HEATING_COOLING_STATE,  1 ); //HEAT -> on/off mode
 homekit_characteristic_t cur_heat2 = HOMEKIT_CHARACTERISTIC_(CURRENT_HEATING_COOLING_STATE, 0 );
-homekit_characteristic_t tgt_temp2 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT2, .setter=tgt_temp2_set );
+homekit_characteristic_t tgt_temp2 = HOMEKIT_CHARACTERISTIC_(TARGET_TEMPERATURE,     DEFAULT2, .max_value=(float[]){25}, .setter=tgt_temp2_set );
 homekit_characteristic_t cur_temp2 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         2.0 );
 homekit_characteristic_t dis_temp2 = HOMEKIT_CHARACTERISTIC_(TEMPERATURE_DISPLAY_UNITS,     0 );
 
 homekit_characteristic_t cur_temp3 = HOMEKIT_CHARACTERISTIC_(CURRENT_TEMPERATURE,         3.0 );
+#pragma GCC diagnostic pop
 
 
 void tgt_temp1_set(homekit_value_t value) {
@@ -128,22 +131,22 @@ void tgt_temp2_set(homekit_value_t value) {
 }
 
 
-float ffactor=600;
+float ffactor=35;
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
     .description = "HeaterFactor", \
     .format = homekit_format_uint16, \
-    .min_value=(float[])   {50}, \
-    .max_value=(float[]) {2000}, \
-    .min_step  = (float[]) {50}, \
+    .min_value=(float[])  {25}, \
+    .max_value=(float[])  {80}, \
+    .min_step  = (float[]) {1}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
     .value = HOMEKIT_UINT16_(_value), \
     ##__VA_ARGS__
     
 void factor_set(homekit_value_t value); 
-homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 600, .setter=factor_set);
+homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 35, .setter=factor_set);
 void factor_set(homekit_value_t value) {
     UDPLUS("Factor: %d\n", value.int_value);
     ffactor=value.int_value;
@@ -561,7 +564,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10012300; break; //1  CH setpoint in deg C  35
+        case 1: message=0x10010000|FLOAT2OT(ffactor); break; //1  CH setpoint in deg C  set by factor
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100

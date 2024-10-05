@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.4.3 changed maximum thermostat setpoint
+- makes it easier to select a temperature
+- range now 10 - 25 degrees celcius
+- changed factor to become the setpoint temperature of the heatpump
+
 ### 0.4.2 added ping-guard
 - will reset if no ping for 5 minutes
 - added hysteresis values to heater outcome logic
