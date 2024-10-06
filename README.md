@@ -2,6 +2,10 @@ the README
 
 ## version history
 
+### 0.4.4 reset some GPIO ports to input in lcm-api
+- todo: reset all relevant ports
+- change UDPLGP to UDPLUS
+
 ### 0.4.3 changed maximum thermostat setpoint
 - makes it easier to select a temperature
 - range now 10 - 25 degrees celcius
