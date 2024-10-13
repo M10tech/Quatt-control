@@ -2,6 +2,11 @@ the README
 
 ## version history
 
+### 0.4.5 gradual setpoint tracking
+- repurpose factor to define tracking delta
+- update OT room_temp only once per minute instead of every 10s
+- OT CH setpoint now zero when off and 35 deg when on
+
 ### 0.4.4 reset some GPIO ports to input in lcm-api
 - todo: reset all relevant ports
 - change UDPLGP to UDPLUS

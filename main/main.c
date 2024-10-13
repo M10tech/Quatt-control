@@ -131,25 +131,25 @@ void tgt_temp2_set(homekit_value_t value) {
 }
 
 
-float ffactor=35;
+float ffactor=0.5;
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
     .description = "HeaterFactor", \
     .format = homekit_format_uint16, \
-    .min_value=(float[])  {25}, \
-    .max_value=(float[])  {80}, \
-    .min_step  = (float[]) {1}, \
+    .min_value=(float[])   {5}, \
+    .max_value=(float[]) {300}, \
+    .min_step  = (float[]) {5}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
     .value = HOMEKIT_UINT16_(_value), \
     ##__VA_ARGS__
     
 void factor_set(homekit_value_t value); 
-homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 35, .setter=factor_set);
+homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 50, .setter=factor_set);
 void factor_set(homekit_value_t value) {
     UDPLUS("Factor: %d\n", value.int_value);
-    ffactor=value.int_value;
+    ffactor=value.int_value*0.01;
     factor.value=value;
 }
 
@@ -237,7 +237,7 @@ void temp_task(void *argv) {
             mqtt_client_publish("{\"idx\":%d,\"nvalue\":4,\"svalue\":\"Heater No Sensors\"}", idx);
             UDPLUS("restarting because can't find enough sensors\n");
             vTaskDelay(3000/portTICK_PERIOD_MS); //allow MQTT and UDPlog to flush output
-            esp_restart();
+            esp_restart(); //TODO: disable GPIO outputs
         }
         vTaskDelay(BEAT*1000/portTICK_PERIOD_MS);
     } //break out when all SENSORS are found
@@ -278,7 +278,7 @@ void temp_task(void *argv) {
 
 // #define RTC_ADDR    0x600013B0
 // #define RTC_MAGIC   0xaabecede
-float room_sp=DEFAULT1;
+float room_sp=DEFAULT1,room_temp=DEFAULT1+0.1;
 float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
 int   heat_on=0;
@@ -303,7 +303,9 @@ int heater(uint32_t seconds) {
     if (delta2<hys2) {heater2=1; hys2=0.1;} else hys2=0.0;
     
     //integrated logic for both heaters
+    room_temp=S1avg;
     room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+hys2+S1avg-S2avg; //note delta is negative so <
+    if ((room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
@@ -564,7 +566,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10010000|FLOAT2OT(ffactor); break; //1  CH setpoint in deg C  set by factor
+        case 1: message=0x10010000|(heat_on?0x2300:0x0000); break; //1  CH setpoint in deg C  set to 35 deg when heat_on
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
@@ -572,7 +574,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                 //    CMD:00000200    RSP:40000200     0 enable CH and DHW   (CH=off and DHW=on)
         case 4: message=0x10100000|FLOAT2OT(room_sp); break; //TODO: introduce gradual tracking
                 //    CMD:10101300    RSP:50101300    16 Room Setpoint = 19
-        case 5: message=0x10180000|FLOAT2OT(S1avg); break; //24 Room temperature
+        case 5: message=0x10180000|FLOAT2OT(room_temp); break; //24 Room temperature
                 //    CMD:101815a8    RSP:501815a8    24 Room temperature = 21.65625
         case 6: message=0x001b4600; break; //27 outside temp
                 //    CMD:001b4600    RSP:401b1152    27 outside temp 70 => 17.32
@@ -609,7 +611,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     
     UDPLUS("\n"); //close detailed report line
     
-    if (!timeIndex) {
+    if (!timeIndex) { //TODO: should this not be at timeIndex==9??
         CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
     }
     
@@ -742,7 +744,7 @@ void ping_task(void *argv) {
     mqtt_client_publish("{\"idx\":%d,\"nvalue\":2,\"svalue\":\"Heater No Ping\"}", idx);
     UDPLUS("restarting because can't ping home-hub\n");
     vTaskDelay(3000/portTICK_PERIOD_MS); //allow MQTT and UDPlog to flush output
-    esp_restart();
+    esp_restart(); //TODO: disable GPIO outputs
 }
 
 mqtt_config_t mqttconf=MQTT_DEFAULT_CONFIG;
