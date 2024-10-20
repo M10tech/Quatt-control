@@ -131,14 +131,16 @@ void tgt_temp2_set(homekit_value_t value) {
 }
 
 
-float ffactor=0.5;
+#define point05 (13/256.0) //these numbers do not get rounded in float operations
+#define point1  (26/256.0) //0.1016
+float ffactor=0.3;
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
     .description = "HeaterFactor", \
     .format = homekit_format_uint16, \
-    .min_value=(float[])   {5}, \
-    .max_value=(float[]) {300}, \
+    .min_value=(float[])   {0}, \
+    .max_value=(float[]) {100}, \
     .min_step  = (float[]) {5}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
@@ -146,10 +148,10 @@ float ffactor=0.5;
     ##__VA_ARGS__
     
 void factor_set(homekit_value_t value); 
-homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 50, .setter=factor_set);
+homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 30, .setter=factor_set);
 void factor_set(homekit_value_t value) {
-    UDPLUS("Factor: %d\n", value.int_value);
-    ffactor=value.int_value*0.01;
+    UDPLUS("Factor: %d\n", value.int_value); //factor 30 == 0.3 degrees maximum steps
+    ffactor=(value.int_value/5)*point05; //only works if factor is multiple of 5
     factor.value=value;
 }
 
@@ -183,7 +185,7 @@ void identify(homekit_value_t _value) {
 #define PO 7 //heatPump outside temp
 #define PM 9 //heatPump max setpoint temp
 float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as a single hex digit, then hardcode which sensor gets which meaning
-float S1temp[6],S2temp[6],S3temp[6],S1avg,S2avg,S3avg;
+float S1temp[8],S2temp[8],S3temp[8],S1avg,S2avg,S3avg;
 float S3total=0;
 int   S3samples=0;
 
@@ -278,7 +280,7 @@ void temp_task(void *argv) {
 
 // #define RTC_ADDR    0x600013B0
 // #define RTC_MAGIC   0xaabecede
-float room_sp=DEFAULT1,room_temp=DEFAULT1+0.1;
+float room_sp=DEFAULT1,room_temp=DEFAULT1+point1;
 float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
 int   heat_on=0;
@@ -296,16 +298,16 @@ int heater(uint32_t seconds) {
     float delta1=0.0,delta2=0.0;
     //heater1 logic
     delta1=S1avg-tgt_temp1.value.float_value;
-    if (delta1<hys1) {heater1=1; hys1=0.1;} else hys1=0.0;
+    if (delta1<hys1) {heater1=1; hys1=point1;} else hys1=0.0;
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
-    if (delta2<hys2) {heater2=1; hys2=0.1;} else hys2=0.0;
+    if (delta2<hys2) {heater2=1; hys2=2*point1;} else hys2=0.0; //needs more hysteresis because more volatile
     
     //integrated logic for both heaters
     room_temp=S1avg;
     room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+hys2+S1avg-S2avg; //note delta is negative so <
-    if ((room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
+    if (ffactor>0 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
@@ -360,8 +362,8 @@ void init_task(void *argv) {
     PUBLISH(tgt_temp1);
     PUBLISH(tgt_temp2);
     //prevents starting heat if no sensor readings would come in
-    S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=tgt_temp1.value.float_value+0.1;
-    S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=tgt_temp2.value.float_value+0.1;
+    S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=S1temp[6]=S1temp[7]=tgt_temp1.value.float_value+point1;
+    S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=S2temp[6]=S2temp[7]=tgt_temp2.value.float_value+point1;
     
     setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1); tzset();
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -466,10 +468,10 @@ static void IRAM_ATTR gpio_isr_handler(void* arg) {
         resp_idx[CHANNEL]=0, rx_state[CHANNEL]=IDLE, response[CHANNEL]=0; \
         ot_recv_enable[CHANNEL]=false; \
         } while(0) //TODO: is resetting these values critical for proper operation?
-#define CalcAvg(Sx) do {            Sx##temp[5]=Sx##temp[4];Sx##temp[4]=Sx##temp[3]; \
-            Sx##temp[3]=Sx##temp[2];Sx##temp[2]=Sx##temp[1];Sx##temp[1]=Sx##temp[0]; \
+#define CalcAvg(Sx) do {            Sx##temp[7]=Sx##temp[6];Sx##temp[6]=Sx##temp[5];Sx##temp[5]=Sx##temp[4]; \
+            Sx##temp[4]=Sx##temp[3];Sx##temp[3]=Sx##temp[2];Sx##temp[2]=Sx##temp[1];Sx##temp[1]=Sx##temp[0]; \
             if ( !isnan(temp[Sx]) && temp[Sx]!=85 )         Sx##temp[0]=temp[Sx];    \
-            Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5])/6.0; \
+            Sx##avg=(Sx##temp[0]+Sx##temp[1]+Sx##temp[2]+Sx##temp[3]+Sx##temp[4]+Sx##temp[5]+Sx##temp[6]+Sx##temp[7])/8.0; \
         } while(0)
 #define FLOAT2OT(f) (((uint32_t)((f)*256*256.0))>>8)
 static TaskHandle_t tempTask = NULL;

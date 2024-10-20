@@ -2,6 +2,12 @@ the README
 
 ## version history
 
+### 0.4.6 align float operations with 1/256 granularity
+- prevents rounding in values sent to opentherm
+- factor = zero now means no restriction
+- default factor now 0.3
+- max factor 1 degree
+
 ### 0.4.5 gradual setpoint tracking
 - repurpose factor to define tracking delta
 - update OT room_temp only once per minute instead of every 10s
