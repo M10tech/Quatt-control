@@ -2,6 +2,12 @@ the README
 
 ## version history
 
+### 0.4.7 cleanup temperature measurement timing
+- original was not well aligned in time
+- grouped temperature activities together in code
+- initialization values must be multiple of 8/256
+- better S3 initialization
+
 ### 0.4.6 align float operations with 1/256 granularity
 - prevents rounding in values sent to opentherm
 - factor = zero now means no restriction
@@ -66,7 +72,7 @@ the README
 
 ### 0.2.6 adjust timeout more
 - still CH1_NO_RSP to be fixed
-- average temperature initialisation
+- average temperature initialization
 
 ### 0.2.5 adjust timeout and report more
 - there is like 1% CH1_NO_RSP to be fixed

@@ -188,6 +188,7 @@ float temp[16]={85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85}; //using id as 
 float S1temp[8],S2temp[8],S3temp[8],S1avg,S2avg,S3avg;
 float S3total=0;
 int   S3samples=0;
+bool  S3set=false;
 
 #define SINKBUS(time) do {gpio_set_level(ONE_WIRE_GND,1);vTaskDelay(time/portTICK_PERIOD_MS); \
                           gpio_set_level(ONE_WIRE_GND,0);vTaskDelay(1);} while(0)
@@ -270,7 +271,13 @@ void temp_task(void *argv) {
                 been_reset=true;
             }
         }
-        if (!isnan(temp[S3]) && temp[S3]!=85) S3samples++,S3total+=temp[S3];
+        if (!isnan(temp[S3]) && temp[S3]!=85) {
+            S3samples++,S3total+=temp[S3];
+            if (S3set==false) { //initialize S3temp with first valid measurement
+                S3temp[0]=S3temp[1]=S3temp[2]=S3temp[3]=S3temp[4]=S3temp[5]=S3temp[6]=S3temp[7]=temp[S3];
+                S3set=true;
+            }
+        }
         TEMP2HK(1);
         TEMP2HK(2);
         TEMP2HK(3);
@@ -362,8 +369,8 @@ void init_task(void *argv) {
     PUBLISH(tgt_temp1);
     PUBLISH(tgt_temp2);
     //prevents starting heat if no sensor readings would come in
-    S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=S1temp[6]=S1temp[7]=tgt_temp1.value.float_value+point1;
-    S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=S2temp[6]=S2temp[7]=tgt_temp2.value.float_value+point1;
+    S1temp[0]=S1temp[1]=S1temp[2]=S1temp[3]=S1temp[4]=S1temp[5]=S1temp[6]=S1temp[7]=tgt_temp1.value.float_value+0.125;
+    S2temp[0]=S2temp[1]=S2temp[2]=S2temp[3]=S2temp[4]=S2temp[5]=S2temp[6]=S2temp[7]=tgt_temp2.value.float_value+0.125;
     
     setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1); tzset();
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -511,10 +518,17 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         cur_heat2.value.int_value= 2;
         homekit_characteristic_notify(&cur_heat2,HOMEKIT_UINT8(cur_heat2.value.int_value));
     }
+    
+    if (timeIndex==0) {
+        xTaskNotifyGive( tempTask ); //temperature measurement start
+        vTaskDelay(1); //TODO: is this needed: prevent interference between OneWire and OT-receiver
+    }
+    if (timeIndex==9) { //even with a bus-reset, results should be in and before a heater calculation
+        CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
+    }
+    
     switch (timeIndex) { //send commands BOILER
         case 0: //measure temperature
-            xTaskNotifyGive( tempTask ); //temperature measurement start
-            vTaskDelay(1); //TODO: is this needed: prevent interference between OneWire and OT-receiver
             message=0x00190000; //25 read boiler water temperature
             break;
         case 1: //execute heater decisions
@@ -612,10 +626,6 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     } //END of HEATPUMP CONTROL
     
     UDPLUS("\n"); //close detailed report line
-    
-    if (!timeIndex) { //TODO: should this not be at timeIndex==9??
-        CalcAvg(S1); CalcAvg(S2); CalcAvg(S3);
-    }
     
     //errorflg=(seconds/600)%2; //test trick to change outcome every 10 minutes
     if (seconds%60==5) {
