@@ -133,24 +133,24 @@ void tgt_temp2_set(homekit_value_t value) {
 
 #define point05 (13/256.0) //these numbers do not get rounded in float operations
 #define point1  (26/256.0) //0.1016
-float ffactor=0.3;
+float ffactor=0.3046875; //corresponds to 3x26/256
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
     .description = "HeaterFactor", \
-    .format = homekit_format_uint16, \
-    .min_value=(float[])   {0}, \
-    .max_value=(float[]) {100}, \
+    .format = homekit_format_int, \
+    .min_value=(float[]){-100}, \
+    .max_value=(float[]) {105}, \
     .min_step  = (float[]) {5}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
-    .value = HOMEKIT_UINT16_(_value), \
+    .value = HOMEKIT_INT_(_value), \
     ##__VA_ARGS__
     
 void factor_set(homekit_value_t value); 
 homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 30, .setter=factor_set);
 void factor_set(homekit_value_t value) {
-    UDPLUS("Factor: %d\n", value.int_value); //factor 30 == 0.3 degrees maximum steps
+    UDPLUS("Factor: %d\n", value.int_value); //factor 30 ~~ 0.3 degrees maximum steps
     ffactor=(value.int_value/5)*point05; //only works if factor is multiple of 5
     factor.value=value;
 }
@@ -305,16 +305,16 @@ int heater(uint32_t seconds) {
     float delta1=0.0,delta2=0.0;
     //heater1 logic
     delta1=S1avg-tgt_temp1.value.float_value;
-    if (delta1<hys1) {heater1=1; hys1=point1;} else hys1=0.0;
+    if (delta1<hys1) {heater1=1; hys1=2*point1;} else hys1=0.0;
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
-    if (delta2<hys2) {heater2=1; hys2=2*point1;} else hys2=0.0; //needs more hysteresis because more volatile
+    if (delta2<hys2) {heater2=1; hys2=2*point1;} else hys2=0.0;
     
     //integrated logic for both heaters
     room_temp=S1avg;
     room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+hys2+S1avg-S2avg; //note delta is negative so <
-    if (ffactor>0 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
+    if (ffactor<1.05 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
     //final report
@@ -332,6 +332,8 @@ int heater(uint32_t seconds) {
     PUBLISH(PReturnw);
     
     //save state to RTC memory
+    //also add crash reason, if known
+    //save two setpoints, factor, crashreason
 //     uint32_t *dp;         WRITE_PERI_REG(RTC_ADDR+ 4,mode     ); //int
 //                           WRITE_PERI_REG(RTC_ADDR+ 8,heat_till); //time_t
 //     dp=(void*)&ffactor;   WRITE_PERI_REG(RTC_ADDR+12,*dp      ); //float

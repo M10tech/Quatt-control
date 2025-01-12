@@ -1,6 +1,22 @@
-the README
+# Quatt-control
+#### one controller to rule them all
+
+An all in one system to control the Quatt  
+- It is a thermostat, measures in two rooms and runs the logic  
+- It is connected with OpenTherm to CiC and Boiler  
+- It reads the On-Off boiler control from the CiC to drive the Boiler  
+- It integrates with HomeKit as two thermostat and outside temperature  
+- Through HomeKit it enables/disables the pump of the floor-heating  
+- With MQTT is reports to Domoticz and to HomeAssistant  
+
+![](https://github.com/M10tech/Quatt-control/blob/master/QuattControl.jpg)
 
 ## version history
+
+### 0.4.8 extend heater factor to negative values
+- hysteresis for heater1 to 0.2 degrees
+- range from -1.00 to 1.00
+- 1.05 means factor does not limit
 
 ### 0.4.7 cleanup temperature measurement timing
 - original was not well aligned in time
