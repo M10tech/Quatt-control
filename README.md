@@ -9,7 +9,7 @@ An all in one system to control the Quatt
 - Through HomeKit it enables/disables the pump of the floor-heating  
 - With MQTT is reports to Domoticz and to HomeAssistant  
 
-![](https://github.com/M10tech/Quatt-control/blob/master/QuattControl.jpg)
+![](https://github.com/M10tech/Quatt-control/blob/main/QuattControl.jpg)
 
 ## version history
 
