@@ -13,6 +13,9 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.5.1 use CHsetpoint also for boiler
+- else the boiler will overshoot and CiC will shut it down
+
 ### 0.5.0 make CHsetpoint to Quatt/CiC a characteristic
 - for experimental reasons, manual control
 - was static 35 degrees Celcius, but boiler would stay off...
