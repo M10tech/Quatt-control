@@ -13,6 +13,10 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.5.0 make CHsetpoint to Quatt/CiC a characteristic
+- for experimental reasons, manual control
+- was static 35 degrees Celcius, but boiler would stay off...
+
 ### 0.4.8 extend heater factor to negative values
 - hysteresis for heater1 to 0.2 degrees
 - range from -1.00 to 1.00

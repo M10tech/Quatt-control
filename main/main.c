@@ -155,6 +155,26 @@ void factor_set(homekit_value_t value) {
     factor.value=value;
 }
 
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_CHSETPOINT HOMEKIT_CUSTOM_UUID("F0000019")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_CHSETPOINT(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_CHSETPOINT, \
+    .description = "CHsetpoint", \
+    .format = homekit_format_int, \
+    .min_value=(float[])  {30}, \
+    .max_value=(float[])  {80}, \
+    .min_step  = (float[]) {1}, \
+    .permissions = homekit_permissions_paired_read \
+                 | homekit_permissions_paired_write, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+    
+void chsetpoint_set(homekit_value_t value); 
+homekit_characteristic_t chsetpoint=HOMEKIT_CHARACTERISTIC_(CUSTOM_CHSETPOINT, 55, .setter=chsetpoint_set);
+void chsetpoint_set(homekit_value_t value) {
+    UDPLUS("CHsetpoint: %d\n", value.int_value);
+    chsetpoint.value=value;
+}
+
 // void identify_task(void *_args) {
 //     vTaskDelete(NULL);
 // }
@@ -584,7 +604,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10010000|(heat_on?0x2300:0x0000); break; //1  CH setpoint in deg C  set to 35 deg when heat_on
+        case 1: message=0x10010000|(heat_on?(chsetpoint.value.int_value*256):0x0000); break; //set to chsetpoint when heat_on
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100
@@ -812,6 +832,7 @@ homekit_accessory_t *accessories[] = {
                     &cur_temp3,
                     &ota_trigger,
                     &factor,
+                    &chsetpoint,
                     NULL
                 }),
             NULL
