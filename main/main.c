@@ -556,7 +556,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         case 1: //execute heater decisions
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    //message=0x10014100; //65 deg //1  CH setpoint in deg C
-                   message=0x10010000|(chsetpoint.value.int_value*256); //1  CH setpoint in deg C
+                   message=0x10010000|((chsetpoint.value.int_value+2)*256); //1  CH setpoint in deg C
             } else message=0x10010000|FLOAT2OT(tgt_temp1.value.float_value*2-1); //range from 19 - 75 deg
             break;
         case 2: message=0x100e6400; break; //100% //14 max modulation level

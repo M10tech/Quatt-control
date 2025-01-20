@@ -13,6 +13,9 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.5.2 increase CHsetpoint of boiler with 2 degrees
+- might prevent missing a switch-off detection of CiC
+
 ### 0.5.1 use CHsetpoint also for boiler
 - else the boiler will overshoot and CiC will shut it down
 
