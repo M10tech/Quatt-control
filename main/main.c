@@ -160,7 +160,7 @@ void factor_set(homekit_value_t value) {
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_CHSETPOINT, \
     .description = "CHsetpoint", \
     .format = homekit_format_int, \
-    .min_value=(float[])  {30}, \
+    .min_value=(float[])  {20}, \
     .max_value=(float[])  {80}, \
     .min_step  = (float[]) {1}, \
     .permissions = homekit_permissions_paired_read \
@@ -169,7 +169,7 @@ void factor_set(homekit_value_t value) {
     ##__VA_ARGS__
     
 void chsetpoint_set(homekit_value_t value); 
-homekit_characteristic_t chsetpoint=HOMEKIT_CHARACTERISTIC_(CUSTOM_CHSETPOINT, 55, .setter=chsetpoint_set);
+homekit_characteristic_t chsetpoint=HOMEKIT_CHARACTERISTIC_(CUSTOM_CHSETPOINT, 35, .setter=chsetpoint_set);
 void chsetpoint_set(homekit_value_t value) {
     UDPLUS("CHsetpoint: %d\n", value.int_value);
     chsetpoint.value=value;
@@ -273,8 +273,8 @@ void temp_task(void *argv) {
         for (int indx=0;indx<sensor_count; indx++) {
             if ((result=ds18b20_trigger_temperature_conversion(ds18b20s[indx])) == ESP_OK) { //has 800ms delay built into the conversion...
                 if ((result=ds18b20_get_temperature(ds18b20s[indx], &temperature)) == ESP_OK) { //get temperature from sensors one by one
-                    temp[ids[indx]] = temperature;
                     //UDPLUS("temperature read from DS18B20[%d]: %.4fC\n", indx, temperature);
+                    temp[ids[indx]] = (temperature>125.0 || temperature<-55.0)?NAN:temperature;
                 } else {
                     UDPLUS("ds18b20_get_temperature for id:%d failed %x: %s\n",ids[indx],result,esp_err_to_name(result));
                     temp[ids[indx]] = NAN;
@@ -310,7 +310,7 @@ void temp_task(void *argv) {
 float room_sp=DEFAULT1,room_temp=DEFAULT1+point1;
 float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
-int   heat_on=0;
+int   heat_on=0,csp=30;
 float hys1=0.0,hys2=0.0;
 int heater(uint32_t seconds) {
     char strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
@@ -337,9 +337,16 @@ int heater(uint32_t seconds) {
     if (ffactor<1.05 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
+    //calculate adjusted ChSetPoint aka CSP
+    float          csp_target=chsetpoint.value.int_value;
+    if (result==1) csp_target=chsetpoint.value.int_value-S3avg*0.5;
+    if (result==2) csp_target=chsetpoint.value.int_value-S3avg*2.0;
+    if (csp>csp_target+1) csp=(int)csp_target;
+    if (csp<csp_target-1) csp=(int)csp_target;
+    
     //final report
-    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d+h2:%d=on:%d ST=%02x PST=%02x\n", \
-            S1avg,S2avg,S3avg,(seconds+10)/60,strtm,room_sp,heater1,heater2,result,stateflg,pumpstateflg);
+    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => csp:%d room_sp:%5.2f h1:%d+h2:%d=on:%d ST=%02x PST=%02x\n", \
+            S1avg,S2avg,S3avg,(seconds+10)/60,strtm,csp,room_sp,heater1,heater2,result,stateflg,pumpstateflg);
     PUBLISH(S1avg);
     PUBLISH(S2avg);
     PUBLISH(heat_mod);
@@ -556,7 +563,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         case 1: //execute heater decisions
             if (tgt_heat2.value.int_value==HOMEKIT_TARGET_HEATING_COOLING_STATE_HEAT) { //use on/off switching thermostat
                    //message=0x10014100; //65 deg //1  CH setpoint in deg C
-                   message=0x10010000|((chsetpoint.value.int_value+2)*256); //1  CH setpoint in deg C
+                   message=0x10010000|((csp+2)*256); //1  CH setpoint in deg C
             } else message=0x10010000|FLOAT2OT(tgt_temp1.value.float_value*2-1); //range from 19 - 75 deg
             break;
         case 2: message=0x100e6400; break; //100% //14 max modulation level
@@ -605,7 +612,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
     switch (timeIndex) { //send commands HEATPUMP
         case 0: message=0x00194600; break; //25 read boiler water temperature
                 //    CMD:00194600    RSP:40191752    25 read boiler water temperature 70 => 23.32
-        case 1: message=0x10010000|(heat_on?(chsetpoint.value.int_value*256):0x0000); break; //set to chsetpoint when heat_on
+        case 1: message=0x10010000|(heat_on?(csp*256):0x0000); break; //set to chsetpoint when heat_on
                 //    CMD:10010000    RSP:50010000     1 CH setpoint in deg C  (now zero, since CH=off)
         case 2: message=0x100e6400; break; //100% //14 max modulation level
                 //    CMD:100e6400    RSP:500e6400    14 max modulation level = 100

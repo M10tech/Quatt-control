@@ -13,6 +13,11 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.5.3 make CH Set Point depend on outside temperature S3
+- Homekit chsetpoint used as base, default 35
+- if heater==1, CSP=base-S3/2
+- if heater==2, CSP=base-S3*2
+
 ### 0.5.2 increase CHsetpoint of boiler with 2 degrees
 - might prevent missing a switch-off detection of CiC
 
