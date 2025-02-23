@@ -343,6 +343,7 @@ int heater(uint32_t seconds) {
     if (result==2) csp_target=chsetpoint.value.int_value-S3avg*2.0;
     if (csp>csp_target+1) csp=(int)csp_target;
     if (csp<csp_target-1) csp=(int)csp_target;
+    if (csp<20) csp=20;
     
     //final report
     UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d+h2:%d=on:%d csp:%d ST=%02x PST=%02x\n", \

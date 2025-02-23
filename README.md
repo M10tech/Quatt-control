@@ -13,6 +13,9 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.6.1 do not allow csp below 20
+- it even managed to become -1 sending wrong value to opentherm CiC
+
 ### 0.6.0 make upstairs heater algorithm dumb so Quatt can be smart
 - hypothesis is that CiC will reduce compressor level according to need
 - so when there is overshoot, but outside is cold, choose the level for maintain
