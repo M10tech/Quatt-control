@@ -13,6 +13,13 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.6.0 make upstairs heater algorithm dumb so Quatt can be smart
+- hypothesis is that CiC will reduce compressor level according to need
+- so when there is overshoot, but outside is cold, choose the level for maintain
+- this is an experiment, so success not guaranteed...
+- changed heater factor reset value to 105 = no restriction
+- changed CSP base default value to 30
+
 ### 0.5.3 make CH Set Point depend on outside temperature S3
 - Homekit chsetpoint used as base, default 35
 - if heater==1, CSP=base-S3/2

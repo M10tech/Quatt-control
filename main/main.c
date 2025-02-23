@@ -148,7 +148,7 @@ float ffactor=0.3046875; //corresponds to 3x26/256
     ##__VA_ARGS__
     
 void factor_set(homekit_value_t value); 
-homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 30, .setter=factor_set);
+homekit_characteristic_t factor=HOMEKIT_CHARACTERISTIC_(CUSTOM_FACTOR, 105, .setter=factor_set);
 void factor_set(homekit_value_t value) {
     UDPLUS("Factor: %d\n", value.int_value); //factor 30 ~~ 0.3 degrees maximum steps
     ffactor=(value.int_value/5)*point05; //only works if factor is multiple of 5
@@ -161,7 +161,7 @@ void factor_set(homekit_value_t value) {
     .description = "CHsetpoint", \
     .format = homekit_format_int, \
     .min_value=(float[])  {20}, \
-    .max_value=(float[])  {80}, \
+    .max_value=(float[])  {50}, \
     .min_step  = (float[]) {1}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
@@ -169,7 +169,7 @@ void factor_set(homekit_value_t value) {
     ##__VA_ARGS__
     
 void chsetpoint_set(homekit_value_t value); 
-homekit_characteristic_t chsetpoint=HOMEKIT_CHARACTERISTIC_(CUSTOM_CHSETPOINT, 35, .setter=chsetpoint_set);
+homekit_characteristic_t chsetpoint=HOMEKIT_CHARACTERISTIC_(CUSTOM_CHSETPOINT, 30, .setter=chsetpoint_set);
 void chsetpoint_set(homekit_value_t value) {
     UDPLUS("CHsetpoint: %d\n", value.int_value);
     chsetpoint.value=value;
@@ -311,7 +311,7 @@ float room_sp=DEFAULT1,room_temp=DEFAULT1+point1;
 float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
 int   heat_on=0,csp=30;
-float hys1=0.0,hys2=0.0;
+float hys1=0.0;
 int heater(uint32_t seconds) {
     char strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
     struct timeval tv;
@@ -329,11 +329,11 @@ int heater(uint32_t seconds) {
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
-    if (delta2<hys2) {heater2=1; hys2=2*point1;} else hys2=0.0;
+    if (delta2<0.5) heater2=1; //let the CiC regulate this itself
     
     //integrated logic for both heaters
     room_temp=S1avg;
-    room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+hys2+S1avg-S2avg; //note delta is negative so <
+    room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+S1avg-S2avg; //note delta is negative so <
     if (ffactor<1.05 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 
@@ -345,8 +345,8 @@ int heater(uint32_t seconds) {
     if (csp<csp_target-1) csp=(int)csp_target;
     
     //final report
-    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => csp:%d room_sp:%5.2f h1:%d+h2:%d=on:%d ST=%02x PST=%02x\n", \
-            S1avg,S2avg,S3avg,(seconds+10)/60,strtm,csp,room_sp,heater1,heater2,result,stateflg,pumpstateflg);
+    UDPLUS("S1=%7.4f S2=%7.4f S3=%7.4f Heater@%-4ld  %s => room_sp:%5.2f h1:%d+h2:%d=on:%d csp:%d ST=%02x PST=%02x\n", \
+            S1avg,S2avg,S3avg,(seconds+10)/60,strtm,room_sp,heater1,heater2,result,csp,stateflg,pumpstateflg);
     PUBLISH(S1avg);
     PUBLISH(S2avg);
     PUBLISH(heat_mod);
