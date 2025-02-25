@@ -325,7 +325,7 @@ int heater(uint32_t seconds) {
     float delta1=0.0,delta2=0.0;
     //heater1 logic
     delta1=S1avg-tgt_temp1.value.float_value;
-    if (delta1<hys1) {heater1=1; hys1=2*point1;} else hys1=0.0;
+    if (delta1<hys1) {heater1=1; hys1=point1;} else hys1=0.0;
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
@@ -333,7 +333,7 @@ int heater(uint32_t seconds) {
     
     //integrated logic for both heaters
     room_temp=S1avg;
-    room_sp=(delta1<delta2)?tgt_temp1.value.float_value+hys1:tgt_temp2.value.float_value+S1avg-S2avg; //note delta is negative so <
+    room_sp=heater1?tgt_temp1.value.float_value+hys1:S1avg-delta2;
     if (ffactor<1.05 && (room_sp-room_temp)>ffactor) room_sp=room_temp+ffactor;
     int result=0; if (heater1) result=1; else if (heater2) result=2; //we must inhibit floor heater pump
 

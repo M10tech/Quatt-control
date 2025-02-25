@@ -13,6 +13,10 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.6.2 remove clipping of room setpoint if upstairs is warmer than living
+- this means upstairs can tune down the demand if it warms up in this situation
+- change hysteresis of heater1 from 0.2 to 0.1 degrees C
+
 ### 0.6.1 do not allow csp below 20
 - it even managed to become -1 sending wrong value to opentherm CiC
 
