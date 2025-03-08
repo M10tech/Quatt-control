@@ -311,7 +311,7 @@ float room_sp=DEFAULT1,room_temp=DEFAULT1+point1;
 float curr_mod=0,heat_mod=0,pump_mod=0,pressure=0;
 int   time_set=0,stateflg=0,pumpstateflg=0,errorflg=0;
 int   heat_on=0,csp=30;
-float hys1=0.0;
+float hys1=0.0,hys2=0.0;
 int heater(uint32_t seconds) {
     char strtm[32]; // e.g. DST0wd2yd4    5|07:02:00.060303
     struct timeval tv;
@@ -329,7 +329,7 @@ int heater(uint32_t seconds) {
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
-    if (delta2<0.5) heater2=1; //let the CiC regulate this itself
+    if (delta2<0.5+hys2) {heater2=1; hys2=0.02;  } else hys2=0.0; //let the CiC regulate this itself above 0.5
     
     //integrated logic for both heaters
     room_temp=S1avg;
@@ -581,7 +581,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         case 9: message=0x00110000; break; //17 rel mod level
         default: break;
     }
-    send_OT_frame(BOILER, message); //send message to BOILER OT receiver
+    if (seconds>50) send_OT_frame(BOILER, message); //send message to BOILER OT receiver
     //since we want to run two OT channels every second, we only wait for response for 400ms
     if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",BOILER,message);
@@ -633,7 +633,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
                 //    CMD:00110000    RSP:40110000    17 rel mod level
         default: break;
     }
-    send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
+    if (seconds>50) send_OT_frame(HEATPUMP, message); //send message to HEATPUMP OT receiver
     //since we want to run two OT channels every second, we only wait for response for 400ms
     if (xQueueReceive(gpio_evt_queue[HEATPUMP], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",HEATPUMP,message);

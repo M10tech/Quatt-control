@@ -13,6 +13,10 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.6.3 don't send OT messages until heater is initialised
+- it takes 50s before heater function is first run
+- apply a small hysteresis to heater2 early heating activation point
+
 ### 0.6.2 remove clipping of room setpoint if upstairs is warmer than living
 - this means upstairs can tune down the demand if it warms up in this situation
 - change hysteresis of heater1 from 0.2 to 0.1 degrees C
