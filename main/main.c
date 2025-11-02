@@ -133,7 +133,7 @@ void tgt_temp2_set(homekit_value_t value) {
 
 #define point05 (13/256.0) //these numbers do not get rounded in float operations
 #define point1  (26/256.0) //0.1016
-float ffactor=0.3046875; //corresponds to 3x26/256
+float ffactor=1.05;
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
@@ -329,7 +329,7 @@ int heater(uint32_t seconds) {
     
     //heater2 logic
     delta2=S2avg-tgt_temp2.value.float_value;
-    if (delta2<0.5+hys2) {heater2=1; hys2=0.02;  } else hys2=0.0; //let the CiC regulate this itself above 0.5
+    if (delta2<0.5+hys2) {heater2=1; hys2=0.05;  } else hys2=0.0; //let the CiC regulate this itself above 0.5
     
     //integrated logic for both heaters
     room_temp=S1avg;
@@ -581,7 +581,7 @@ void vTimerCallback( TimerHandle_t xTimer ) {
         case 9: message=0x00110000; break; //17 rel mod level
         default: break;
     }
-    if (seconds>50) send_OT_frame(BOILER, message); //send message to BOILER OT receiver
+    send_OT_frame(BOILER, message); //send message to BOILER OT receiver
     //since we want to run two OT channels every second, we only wait for response for 400ms
     if (xQueueReceive(gpio_evt_queue[BOILER], &(message), (TickType_t)400/portTICK_PERIOD_MS) == pdTRUE) {
         UDPLUS("CH%dRSP:%08lx ",BOILER,message);

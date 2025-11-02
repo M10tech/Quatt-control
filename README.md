@@ -13,6 +13,11 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.6.4 hysteresis2 adjust and send OT to boiler always
+- without OT messsages, boiler will decide to burn
+- increase hys2 from 0.02 to 0.05
+- fix init value of ffactor
+
 ### 0.6.3 don't send OT messages until heater is initialised
 - it takes 50s before heater function is first run
 - apply a small hysteresis to heater2 early heating activation point
