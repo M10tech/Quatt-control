@@ -13,6 +13,10 @@ An all in one system to control the Quatt
 
 ## version history
 
+### 0.7.0 introduce storing settings in nvs
+- setpoints and factor and ch-setpoint
+- also adjust max value and init values
+
 ### 0.6.4 hysteresis2 adjust and send OT to boiler always
 - without OT messsages, boiler will decide to burn
 - increase hys2 from 0.02 to 0.05

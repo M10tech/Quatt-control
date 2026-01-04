@@ -72,6 +72,7 @@ int idx=68; //the domoticz base index
 #define  PReturnw_ix 62
 
 char    *pinger_target=NULL;
+nvs_handle_t qc_handle;
 
 /* ============== BEGIN HOMEKIT CHARACTERISTIC DECLARATIONS =============================================================== */
 // add this section to make your device OTA capable
@@ -133,7 +134,7 @@ void tgt_temp2_set(homekit_value_t value) {
 
 #define point05 (13/256.0) //these numbers do not get rounded in float operations
 #define point1  (26/256.0) //0.1016
-float ffactor=1.05;
+float ffactor=1.06;
 #define HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR HOMEKIT_CUSTOM_UUID("F0000009")
 #define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_FACTOR(_value, ...) \
     .type = HOMEKIT_CHARACTERISTIC_CUSTOM_FACTOR, \
@@ -161,7 +162,7 @@ void factor_set(homekit_value_t value) {
     .description = "CHsetpoint", \
     .format = homekit_format_int, \
     .min_value=(float[])  {20}, \
-    .max_value=(float[])  {50}, \
+    .max_value=(float[])  {60}, \
     .min_step  = (float[]) {1}, \
     .permissions = homekit_permissions_paired_read \
                  | homekit_permissions_paired_write, \
@@ -374,11 +375,32 @@ int heater(uint32_t seconds) {
 //     dp=(void*)&S3total;   WRITE_PERI_REG(RTC_ADDR+40,*dp      ); //float
 //                           WRITE_PERI_REG(RTC_ADDR+44,S3samples); //int
 //                           WRITE_PERI_REG(RTC_ADDR   ,RTC_MAGIC);
+    // From "idf/components/nvs_flash/src/nvs_storage.cpp"
+    // Do a sanity check that the item in question is actually being modified.
+    // If it isn't, it is cheaper to purposefully not write out new data.
+    // since it may invoke an erasure of flash.
+    nvs_set_u16(qc_handle,"TT1",(uint16_t)(tgt_temp1.value.float_value*10));
+    nvs_set_u16(qc_handle,"TT2",(uint16_t)(tgt_temp2.value.float_value*10));
+    nvs_set_i8(qc_handle,"fctr",(int8_t)factor.value.int_value);
+    nvs_set_i8(qc_handle,"chsp",(int8_t)chsetpoint.value.int_value);
+    nvs_commit(qc_handle);
     return result;
 }
 
 void init_task(void *argv) {
+    uint16_t tt1=210, tt2=210;
+    int8_t fctr=105, chsp=38;
     vTaskDelay(1000/portTICK_PERIOD_MS);
+    nvs_open("QC", NVS_READWRITE, &qc_handle);
+    nvs_get_u16(qc_handle,"TT1",&tt1);
+    nvs_get_u16(qc_handle,"TT2",&tt2);
+    nvs_get_i8(qc_handle,"fctr",&fctr);
+    nvs_get_i8(qc_handle,"chsp",&chsp);
+    //TODO: do some errorchecking?
+    tgt_temp1.value.float_value=tt1/10.0;
+    tgt_temp2.value.float_value=tt2/10.0;
+    factor.value.int_value=fctr;
+    chsetpoint.value.int_value=chsp;
 //     printf("RTC: "); for (int i=0;i<7;i++) printf("%08x ",READ_PERI_REG(RTC_ADDR+i*4)); printf("\n");
 //     uint32_t *dp;
 // 	if (READ_PERI_REG(RTC_ADDR)==RTC_MAGIC) {
